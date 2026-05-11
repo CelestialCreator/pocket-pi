@@ -81,12 +81,15 @@ fun ConfigSheet(onDismiss: () -> Unit) {
     var providers by remember { mutableStateOf<List<ConfigStore.ProviderChoice>>(emptyList()) }
     var activeProvider by remember { mutableStateOf("") }
     var activeModel by remember { mutableStateOf("") }
+    var customModelId by remember { mutableStateOf("") }
+    var customModelName by remember { mutableStateOf("") }
     fun reloadProviders() {
+        // Sync first — any provider with a saved api-key but no models.json
+        // entry gets one created on the fly, so the chip row reflects every
+        // provider the user can actually use.
+        ConfigStore.syncProvidersFromKeys(ctx)
         providers = ConfigStore.discoverProviders(ctx)
         val (p, m) = ConfigStore.readActiveModel(ctx)
-        // If settings.json has no defaultProvider yet, pre-select the first
-        // provider so the model list isn't empty when the user opens the
-        // sheet for the first time. They can still switch via the chips.
         val firstProvider = providers.firstOrNull()
         activeProvider = p.ifBlank { firstProvider?.id ?: "" }
         val matched = providers.firstOrNull { it.id == activeProvider }
@@ -179,6 +182,47 @@ fun ConfigSheet(onDismiss: () -> Unit) {
                         }
                     }
                 }
+                // Custom model id — for any model not in the predefined list.
+                // Writes through to models.json (the provider entry already
+                // exists from syncProvidersFromKeys) and auto-selects it.
+                Text(
+                    "Add a custom model (e.g. qwen/qwen3-235b-thinking)",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                OutlinedTextField(
+                    value = customModelId,
+                    onValueChange = { customModelId = it },
+                    label = { Text("Model id") },
+                    placeholder = { Text("provider/model-name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = customModelName,
+                    onValueChange = { customModelName = it },
+                    label = { Text("Display name (optional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedButton(
+                    onClick = {
+                        val id = customModelId.trim()
+                        if (id.isBlank() || activeProvider.isBlank()) return@OutlinedButton
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                ConfigStore.addCustomModel(ctx, activeProvider, id, customModelName.trim())
+                            }
+                            customModelId = ""
+                            customModelName = ""
+                            reloadProviders()
+                            activeModel = id
+                            status = "Added $activeProvider / $id"
+                        }
+                    },
+                    enabled = activeProvider.isNotBlank() && customModelId.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Add model") }
+
                 Button(
                     onClick = {
                         scope.launch {

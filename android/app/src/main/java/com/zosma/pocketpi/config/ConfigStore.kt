@@ -44,6 +44,67 @@ object ConfigStore {
     fun readKey(ctx: Context, provider: String): String =
         runCatching { keyFile(ctx, provider).readText().trim() }.getOrDefault("")
 
+    /**
+     * Walks every well-known provider and, if its api-key file is non-empty,
+     * ensures that provider has a block in models.json. Cheap idempotent
+     * reconciliation step — call on every config-sheet open so a key saved
+     * on a stale build still surfaces as a chip in the picker.
+     */
+    fun syncProvidersFromKeys(ctx: Context) {
+        WELL_KNOWN_PROVIDERS.forEach { p ->
+            if (readKey(ctx, p).isNotEmpty()) runCatching { ensureProviderEntry(ctx, p) }
+        }
+    }
+
+    /**
+     * Append a user-supplied model to a provider's models[] in models.json
+     * (deduped by id). Used by the "Custom model" input in the Config sheet
+     * for any model the predefined list doesn't cover.
+     */
+    fun addCustomModel(ctx: Context, provider: String, modelId: String, modelName: String) {
+        val id = modelId.trim()
+        if (id.isBlank() || provider.isBlank()) return
+        // If the provider has no entry yet (e.g. user pasted a key for a
+        // brand-new provider name not in WELL_KNOWN_PROVIDERS), seed one
+        // with an empty models[] so the new model has somewhere to land.
+        val mj = modelsJson(ctx)
+        val root = if (mj.exists()) {
+            runCatching { JSONObject(mj.readText()) }.getOrDefault(JSONObject())
+        } else JSONObject()
+        val providers = root.optJSONObject("providers") ?: JSONObject().also { root.put("providers", it) }
+        val pObj = providers.optJSONObject(provider) ?: PROVIDER_TEMPLATES[provider]?.let { tpl ->
+            JSONObject().apply {
+                put("baseUrl", tpl.baseUrl)
+                put("apiKey", "${provider.uppercase().replace('-', '_')}_API_KEY")
+                put("api", tpl.api)
+                put("authHeader", tpl.authHeader)
+                put("models", JSONArray())
+            }.also { providers.put(provider, it) }
+        } ?: JSONObject().apply {
+            // Unknown provider: assume OpenAI-compatible. User can edit
+            // models.json directly if the assumption is wrong.
+            put("apiKey", "${provider.uppercase().replace('-', '_')}_API_KEY")
+            put("api", "openai-completions")
+            put("authHeader", true)
+            put("models", JSONArray())
+        }.also { providers.put(provider, it) }
+
+        val modelsArr = pObj.optJSONArray("models") ?: JSONArray().also { pObj.put("models", it) }
+        // Dedupe by id — if it already exists, just update the display name.
+        for (i in 0 until modelsArr.length()) {
+            val m = modelsArr.optJSONObject(i) ?: continue
+            if (m.optString("id") == id) {
+                m.put("name", modelName.ifBlank { id })
+                mj.parentFile?.mkdirs()
+                mj.writeText(root.toString(2))
+                return
+            }
+        }
+        modelsArr.put(JSONObject().apply { put("id", id); put("name", modelName.ifBlank { id }) })
+        mj.parentFile?.mkdirs()
+        mj.writeText(root.toString(2))
+    }
+
     fun saveKey(ctx: Context, provider: String, key: String) {
         val f = keyFile(ctx, provider)
         f.parentFile?.mkdirs()
