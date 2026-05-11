@@ -2,32 +2,20 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <!-- Greek letter Pi (π), centered in the 108x108 safe area (66dp inner). -->
-    <group android:translateX="27" android:translateY="27">
-        <path
-            android:fillColor="#EFEFEF"
-            android:pathData="M6,12
-                L48,12
-                L48,18
-                L40,18
-                L40,42
-                C40,46 41,48 44,48
-                L48,48
-                L48,54
-                L42,54
-                C36,54 32,52 32,46
-                L32,18
-                L20,18
-                L20,46
-                C20,52 16,54 10,54
-                L6,54
-                L6,48
-                L10,48
-                C13,48 14,46 14,42
-                L14,18
-                L6,18
-                Z" />
-    </group>
+    android:viewportWidth="800"
+    android:viewportHeight="800">
+    <!--
+        pi.dev logo (https://pi.dev/logo-auto.svg).
+        Tetris-style "P" + "i" dot. Drawn into the 800x800 viewport that the
+        original SVG uses; the logo's bounding box (165..635) is already inset
+        from the edges, so it lands inside the 66/108 adaptive-icon safe zone
+        with comfortable padding without needing extra scaling.
+    -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M165.29,165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65,282.65 V400 H400 V282.65 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M517.36,400 H634.72 V634.72 H517.36 Z" />
 </vector>

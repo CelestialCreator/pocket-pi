@@ -38,7 +38,16 @@ fi
 # legacy code paths that explicitly resolve it.
 echo "==> Installing npm packages globally"
 npm config set prefix "$PREFIX"
-xargs -a "$ETC/npm-packages.txt" npm install -g --force
+# Install one-at-a-time with `|| true` so a single failing package (e.g.
+# one with a broken native build like node-pty on android-arm64) doesn't
+# abort the whole run. Anything that fails just won't be registered as a
+# Pi extension in step 3a — the rest of Pi still works.
+while IFS= read -r pkg; do
+  pkg="${pkg%%#*}"; pkg="${pkg// /}"
+  [ -z "$pkg" ] && continue
+  echo "  -> npm install -g --force $pkg"
+  npm install -g --force "$pkg" 2>&1 | tail -3 || echo "  WARN: $pkg failed to install"
+done < "$ETC/npm-packages.txt"
 
 # --- 3. pip packages (non-fatal: dspy depends on jiter which needs Rust to
 #       build from source on aarch64-linux-android, and no prebuilt wheel
