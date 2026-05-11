@@ -1,0 +1,40 @@
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+.npmrc
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+.venv/
+venv/
+
+# Android
+.gradle/
+local.properties
+captures/
+*.iml
+.idea/
+android/app/build/
+android/build/
+android/.cxx/
+android/.kotlin/
+
+# Local tooling state
+.claude/
+
+# Bootstrap output + upstream Termux clone (fetched on demand by rebuild-with-prefix.sh)
+bootstrap/dist/
+bootstrap/work/
+bootstrap/termux-packages/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.swp

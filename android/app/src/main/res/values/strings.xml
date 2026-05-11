@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pocket Pi</string>
+    <string name="onboarding_title">Welcome to Pocket Pi</string>
+    <string name="onboarding_subtitle">Set up your agent in three steps.</string>
+    <string name="onboarding_provider">Sign in to your LLM provider</string>
+    <string name="onboarding_perms">Grant the permissions Pocket Pi needs</string>
+    <string name="onboarding_battery">Allow background work (battery optimisation)</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_mic">Voice input</string>
+    <string name="chat_attach">Attach</string>
+    <string name="settings">Settings</string>
+    <string name="model_picker">Model</string>
+    <string name="service_running">Pocket Pi is running</string>
+    <string name="service_channel_name">Pocket Pi background</string>
+    <string name="service_channel_desc">Keeps Pi alive while you use the app.</string>
+</resources>

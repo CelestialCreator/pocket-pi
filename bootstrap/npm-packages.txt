@@ -1,0 +1,13 @@
+@mariozechner/pi-coding-agent
+@earendil-works/pi-coding-agent
+@earendil-works/pi-agent-core
+@earendil-works/pi-ai
+@earendil-works/pi-tui
+@e9n/pi-webserver
+@e9n/pi-mobile
+pi-web-access
+pi-subagents
+oh-pi
+@aliou/pi-guardrails
+pi-mcp-adapter
+pk-pi-hermes-evolve
