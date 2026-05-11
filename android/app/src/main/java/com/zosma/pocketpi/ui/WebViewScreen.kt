@@ -53,14 +53,22 @@ import java.net.URL
 import java.net.URLEncoder
 
 /**
- * Single-WebView surface backed by pi-mobile.
+ * Single-WebView surface. Two UI options can be the chat front-end:
+ *
+ *   - pi-agent-dashboard (preferred, this branch) — binds :8000, root path,
+ *     no auth needed for localhost. Built-in slash commands, session history,
+ *     model picker. Spawned by PiBridge alongside pi --mode rpc.
+ *   - pi-mobile (fallback) — binds :4100, requires apiToken POST to
+ *     /_auth/login before /mobile.
  *
  * Lifecycle states:
  *   1. Server not yet up (first run = postinstall, returning users = bind wait)
  *      → live tail of postinstall.log + status + Retry button
  *   2. Server up
- *      → WebView posts apiToken to /_auth/login, redirects to /mobile
+ *      → WebView loads http://127.0.0.1:8000/ (dashboard) or, if 8000 isn't
+ *        bound after the wait, posts apiToken to :4100/_auth/login as before.
  */
+private const val DASHBOARD_PORT = 8000
 @Composable
 fun WebViewScreen() {
     val ctx = LocalContext.current
@@ -109,7 +117,8 @@ fun WebViewScreen() {
     }
 }
 
-private data class WebserverInfo(val port: Int, val token: String)
+private enum class UiMode { DASHBOARD, PI_MOBILE }
+private data class WebserverInfo(val mode: UiMode, val port: Int, val token: String)
 
 private suspend fun runWaitLoop(
     ctx: Context,
@@ -118,18 +127,30 @@ private suspend fun runWaitLoop(
     val infoFile = File(Bootstrapper.homeDir(ctx), ".pi/agent/webserver-info.json")
     val logFile = File(Bootstrapper.homeDir(ctx), ".pi/agent/postinstall.log")
     val deadline = System.currentTimeMillis() + 25 * 60 * 1000L
+    // Give the dashboard a generous 20s after pi-webserver binds before we
+    // give up and fall back to pi-mobile. On a cold start the bridge takes a
+    // few seconds to dial out and the dashboard server even longer to bind.
+    var pmFirstSeenMs: Long = 0
     while (System.currentTimeMillis() < deadline) {
         val tail = readTail(logFile, 18)
+        if (probe(DASHBOARD_PORT)) {
+            onProgress("Connected (dashboard)", tail)
+            return Result.success(WebserverInfo(UiMode.DASHBOARD, DASHBOARD_PORT, ""))
+        }
         val phase = when {
             !infoFile.exists() && !logFile.exists() -> "Preparing first-run install…"
             !infoFile.exists() -> "Installing packages (apt + npm). 5–10 min on first launch."
             else -> {
                 val parsed = parseInfo(infoFile)
                 if (parsed != null && probe(parsed.port)) {
-                    onProgress("Connected", tail)
-                    return Result.success(parsed)
-                }
-                "Pi installed. Waiting for the web server to bind…"
+                    if (pmFirstSeenMs == 0L) pmFirstSeenMs = System.currentTimeMillis()
+                    val waitedMs = System.currentTimeMillis() - pmFirstSeenMs
+                    if (waitedMs > 20_000L) {
+                        onProgress("Connected (pi-mobile fallback)", tail)
+                        return Result.success(parsed)
+                    }
+                    "pi-mobile up — waiting ${20 - waitedMs / 1000}s for dashboard…"
+                } else "Pi installed. Waiting for the web server to bind…"
             }
         }
         onProgress(phase, tail)
@@ -142,7 +163,11 @@ private suspend fun runWaitLoop(
 
 private fun parseInfo(f: File): WebserverInfo? = runCatching {
     val obj = JSONObject(f.readText())
-    WebserverInfo(port = obj.optInt("port", 4100), token = obj.optString("token"))
+    WebserverInfo(
+        mode = UiMode.PI_MOBILE,
+        port = obj.optInt("port", 4100),
+        token = obj.optString("token"),
+    )
 }.getOrNull()?.takeIf { it.token.isNotEmpty() }
 
 private fun readTail(f: File, n: Int): String {
@@ -356,8 +381,16 @@ private fun Web(info: WebserverInfo) {
                 }
                 addJavascriptInterface(NativeBridge(ctx), "PocketPi")
 
-                val body = "token=${URLEncoder.encode(info.token, "UTF-8")}&redirect=/mobile"
-                postUrl("http://127.0.0.1:${info.port}/_auth/login", body.toByteArray(Charsets.UTF_8))
+                when (info.mode) {
+                    UiMode.DASHBOARD -> {
+                        // Localhost is unguarded for the dashboard — no auth POST.
+                        loadUrl("http://127.0.0.1:${info.port}/")
+                    }
+                    UiMode.PI_MOBILE -> {
+                        val body = "token=${URLEncoder.encode(info.token, "UTF-8")}&redirect=/mobile"
+                        postUrl("http://127.0.0.1:${info.port}/_auth/login", body.toByteArray(Charsets.UTF_8))
+                    }
+                }
             }
         },
     )

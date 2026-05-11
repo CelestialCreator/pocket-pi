@@ -19,11 +19,24 @@ class PiBridge(private val ctx: Context) {
     fun start() {
         if (process?.isAlive == true) return
         val prefix = Bootstrapper.prefixDir(ctx)
-        // Bash wraps pi for two reasons: libtermux-exec needs to intercept the
-        // `#!/usr/bin/env node` shebang, and pi --mode rpc requires an
+        // Two children to keep alive:
+        //   1. `pi-dashboard start` binds :8000 (browser UI) and :9999 (the
+        //      pi extension WS). It self-daemonizes via &; logs go to
+        //      ~/.pi/dashboard/dashboard.log via tee.
+        //   2. `pi --mode rpc` runs the agent; the bridge extension (installed
+        //      via npm:@blackbelt-technology/pi-agent-dashboard at postinstall)
+        //      loads at startup and connects out to ws://127.0.0.1:9999.
+        // Bash wraps both for two reasons: libtermux-exec needs to intercept
+        // the `#!/usr/bin/env node` shebang, and pi --mode rpc requires an
         // attached stdin (sleep infinity keeps it open).
         val pb = ProcessBuilder(
             "${prefix}/bin/bash", "--noprofile", "--norc", "-c",
+            // Start the dashboard daemon. Don't fail if it's missing — falling
+            // back to pi-mobile on :4100 still works for first-time runs that
+            // haven't refreshed the npm bundle yet.
+            "mkdir -p \$HOME/.pi/dashboard; " +
+            "(command -v pi-dashboard >/dev/null && " +
+            "  pi-dashboard start >>\$HOME/.pi/dashboard/dashboard.log 2>&1 &) ; " +
             "exec sleep infinity | exec pi --mode rpc",
         ).redirectErrorStream(true)
         pb.environment().putAll(Bootstrapper.termuxEnv(ctx))
@@ -62,6 +75,7 @@ class PiBridge(private val ctx: Context) {
                     if (uid != myUid) return@mapNotNull null
                     // Match the bash/pi/node/sleep we spawned, NOT this app's main process.
                     if (cmd.startsWith("pi") || cmd.contains("node") ||
+                        cmd.contains("pi-dashboard") ||
                         cmd.startsWith("sleep") || cmd.startsWith("bash")) pid else null
                 }
                 .forEach { pid ->

@@ -5,6 +5,7 @@
 @earendil-works/pi-tui
 @e9n/pi-webserver
 @e9n/pi-mobile
+@blackbelt-technology/pi-agent-dashboard
 pi-web-access
 pi-subagents
 oh-pi
