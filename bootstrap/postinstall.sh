@@ -96,6 +96,12 @@ data["pi-webserver"] = {
     "apiToken": token,
     "apiReadToken": token,
 }
+# Pi reads defaultProvider/defaultModel from settings.json at boot and uses
+# them as the active model in the chat. Without these, pi-mobile shows no
+# model picker and prompts have nowhere to go. Set sensible defaults only
+# if the user hasn't picked something already.
+data.setdefault("defaultProvider", "nvidia")
+data.setdefault("defaultModel", "qwen/qwen3-coder-480b-a35b-instruct")
 p.write_text(json.dumps(data, indent=2))
 print(f"merged pi-webserver block into {path}")
 PY

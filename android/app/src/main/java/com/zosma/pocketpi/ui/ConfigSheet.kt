@@ -1,6 +1,9 @@
 package com.zosma.pocketpi.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,8 +14,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -68,11 +78,28 @@ fun ConfigSheet(onDismiss: () -> Unit) {
     var setupLog by remember { mutableStateOf("") }
     var setupRunning by remember { mutableStateOf(false) }
 
+    var providers by remember { mutableStateOf<List<ConfigStore.ProviderChoice>>(emptyList()) }
+    var activeProvider by remember { mutableStateOf("") }
+    var activeModel by remember { mutableStateOf("") }
+    fun reloadProviders() {
+        providers = ConfigStore.discoverProviders(ctx)
+        val (p, m) = ConfigStore.readActiveModel(ctx)
+        // If settings.json has no defaultProvider yet, pre-select the first
+        // provider so the model list isn't empty when the user opens the
+        // sheet for the first time. They can still switch via the chips.
+        val firstProvider = providers.firstOrNull()
+        activeProvider = p.ifBlank { firstProvider?.id ?: "" }
+        val matched = providers.firstOrNull { it.id == activeProvider }
+        activeModel = if (m.isNotBlank() && matched?.models?.any { it.id == m } == true) m
+        else matched?.models?.firstOrNull()?.id ?: ""
+    }
+
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             ConfigStore.WELL_KNOWN_PROVIDERS.forEach { keys[it] = ConfigStore.readKey(ctx, it) }
             agentsMd = ConfigStore.readAgentsMd(ctx)
             modelsJson = ConfigStore.readModelsJson(ctx)
+            reloadProviders()
         }
     }
 
@@ -92,9 +119,85 @@ fun ConfigSheet(onDismiss: () -> Unit) {
             )
 
             HorizontalDivider()
+            SectionTitle("Active model")
+            Text(
+                "Pi sends every prompt to this provider/model. Use a different provider for different jobs — NVIDIA NIM is free, OpenRouter is paid but has the full catalog.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (providers.isEmpty()) {
+                Text(
+                    "No providers configured yet. Paste an API key below, save, then come back here.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            } else {
+                // Provider chip row (horizontally scrollable for >5 providers).
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    providers.forEach { p ->
+                        FilterChip(
+                            selected = p.id == activeProvider,
+                            onClick = {
+                                activeProvider = p.id
+                                activeModel = p.models.firstOrNull()?.id ?: ""
+                            },
+                            label = { Text(p.id.replaceFirstChar { it.uppercase() }) },
+                        )
+                    }
+                }
+                // Model picker for the selected provider — one tappable row
+                // per model, with a check on the selected one. Simpler and
+                // more bullet-proof on Android than ExposedDropdownMenuBox,
+                // which has a known issue where the field consumes the tap
+                // and the dropdown never opens.
+                val modelsForActive = providers.firstOrNull { it.id == activeProvider }?.models ?: emptyList()
+                Text("Model", style = MaterialTheme.typography.labelMedium)
+                modelsForActive.forEach { m ->
+                    val selected = m.id == activeModel
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { activeModel = m.id }
+                            .padding(vertical = 6.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            if (selected) "● " else "○ ",
+                            color = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Column {
+                            Text(m.name, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                m.id,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                Button(
+                    onClick = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                ConfigStore.setActiveModel(ctx, activeProvider, activeModel)
+                                ConfigStore.restartPi()
+                            }
+                            status = "Active model: $activeProvider / $activeModel — Pi restarted"
+                        }
+                    },
+                    enabled = activeProvider.isNotBlank() && activeModel.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Use this model") }
+            }
+
+            HorizontalDivider()
             SectionTitle("Provider API keys")
             Text(
-                "Each key is written to ~/.config/<provider>/api-key and exported to Pi as <PROVIDER>_API_KEY.",
+                "Each key is written to ~/.config/<provider>/api-key and exported to Pi as <PROVIDER>_API_KEY. Saving a new key auto-adds that provider's models to the picker above.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -116,6 +219,7 @@ fun ConfigSheet(onDismiss: () -> Unit) {
                         withContext(Dispatchers.IO) {
                             keys.forEach { (p, v) -> ConfigStore.saveKey(ctx, p, v) }
                         }
+                        reloadProviders()
                         status = "Saved keys"
                     }
                 },

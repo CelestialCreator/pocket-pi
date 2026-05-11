@@ -56,7 +56,21 @@ object ConfigStore {
         // already customized this provider's block, leave it alone.
         if (trimmed.isNotEmpty() && provider in PROVIDER_TEMPLATES) {
             runCatching { ensureProviderEntry(ctx, provider) }
+            runCatching { ensureActiveModelDefault(ctx, provider) }
         }
+    }
+
+    /**
+     * If settings.json has no defaultModel yet, set this provider's first
+     * model as the active default. Lets a brand-new user "save key + send
+     * a message" without first picking a model in the UI.
+     */
+    private fun ensureActiveModelDefault(ctx: Context, provider: String) {
+        val (curProv, curModel) = readActiveModel(ctx)
+        if (curProv.isNotBlank() && curModel.isNotBlank()) return
+        val tpl = PROVIDER_TEMPLATES[provider] ?: return
+        val firstModel = tpl.models.firstOrNull()?.first ?: return
+        setActiveModel(ctx, provider, firstModel)
     }
 
     private fun ensureProviderEntry(ctx: Context, provider: String) {
@@ -96,9 +110,9 @@ object ConfigStore {
             api = "openai-completions",
             authHeader = true,
             models = listOf(
+                "qwen/qwen3-coder-480b-a35b-instruct" to "Qwen3 Coder 480B",
                 "meta/llama-3.3-70b-instruct" to "Llama 3.3 70B",
                 "deepseek-ai/deepseek-v4-flash" to "DeepSeek V4 Flash",
-                "qwen/qwen3-coder-480b-a35b-instruct" to "Qwen3 Coder 480B",
                 "openai/gpt-oss-120b" to "GPT-OSS 120B",
                 "nvidia/llama-3.3-nemotron-super-49b-v1" to "Nemotron Super 49B",
             ),
@@ -146,6 +160,59 @@ object ConfigStore {
             ),
         ),
     )
+
+    // ── Active provider / model (settings.json defaultProvider + defaultModel) ─
+
+    data class ModelChoice(val id: String, val name: String)
+    data class ProviderChoice(val id: String, val models: List<ModelChoice>)
+
+    private fun settingsJson(ctx: Context): File =
+        File(Bootstrapper.homeDir(ctx), ".pi/agent/settings.json")
+
+    /** Parse models.json to surface what's actually available. */
+    fun discoverProviders(ctx: Context): List<ProviderChoice> {
+        val raw = readModelsJson(ctx)
+        if (raw.isBlank()) return emptyList()
+        val root = runCatching { JSONObject(raw) }.getOrNull() ?: return emptyList()
+        val providers = root.optJSONObject("providers") ?: return emptyList()
+        val out = mutableListOf<ProviderChoice>()
+        providers.keys().forEach { id ->
+            val pObj = providers.optJSONObject(id) ?: return@forEach
+            val modelsArr = pObj.optJSONArray("models") ?: return@forEach
+            val models = (0 until modelsArr.length()).mapNotNull { i ->
+                val m = modelsArr.optJSONObject(i) ?: return@mapNotNull null
+                val mid = m.optString("id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val name = m.optString("name").ifBlank { mid }
+                ModelChoice(mid, name)
+            }
+            if (models.isNotEmpty()) out.add(ProviderChoice(id, models))
+        }
+        return out
+    }
+
+    /** Reads `defaultProvider` + `defaultModel` from settings.json. */
+    fun readActiveModel(ctx: Context): Pair<String, String> {
+        val f = settingsJson(ctx)
+        if (!f.exists()) return "" to ""
+        val obj = runCatching { JSONObject(f.readText()) }.getOrNull() ?: return "" to ""
+        return obj.optString("defaultProvider", "") to obj.optString("defaultModel", "")
+    }
+
+    /**
+     * Writes `defaultProvider` + `defaultModel` into settings.json, preserving
+     * every other key. pi-coding-agent's settings-manager reads these at boot
+     * and selects them as the active provider/model in the chat UI.
+     */
+    fun setActiveModel(ctx: Context, provider: String, modelId: String) {
+        val f = settingsJson(ctx)
+        f.parentFile?.mkdirs()
+        val obj = if (f.exists()) {
+            runCatching { JSONObject(f.readText()) }.getOrDefault(JSONObject())
+        } else JSONObject()
+        obj.put("defaultProvider", provider)
+        obj.put("defaultModel", modelId)
+        f.writeText(obj.toString(2))
+    }
 
     fun readAgentsMd(ctx: Context): String =
         runCatching { agentsMd(ctx).readText() }.getOrDefault("")
