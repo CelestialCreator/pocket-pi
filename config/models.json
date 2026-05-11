@@ -1,0 +1,17 @@
+{
+  "providers": {
+    "nvidia": {
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "apiKey": "NVIDIA_API_KEY",
+      "api": "openai-completions",
+      "authHeader": true,
+      "models": [
+        { "id": "meta/llama-3.3-70b-instruct",            "name": "Llama 3.3 70B" },
+        { "id": "deepseek-ai/deepseek-v4-flash",          "name": "DeepSeek V4 Flash" },
+        { "id": "qwen/qwen3-coder-480b-a35b-instruct",    "name": "Qwen3 Coder 480B" },
+        { "id": "openai/gpt-oss-120b",                    "name": "GPT-OSS 120B" },
+        { "id": "nvidia/llama-3.3-nemotron-super-49b-v1", "name": "Nemotron Super 49B" }
+      ]
+    }
+  }
+}

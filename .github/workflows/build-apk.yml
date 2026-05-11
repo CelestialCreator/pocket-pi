@@ -1,0 +1,71 @@
+# GitHub Actions: build Pocket Pi APK end-to-end.
+# Runs on every push to main and on tags `v*`. Tagged builds upload the APK
+# as a Release artifact.
+
+name: build-apk
+
+on:
+  push:
+    branches: [main]
+    tags:     ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Node 20 + pnpm
+        uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+
+      - name: Build TS extensions
+        run: |
+          cd extensions/pi-termux-tools && pnpm install && pnpm build && cd -
+          cd extensions/pi-skill-learner && pnpm install && pnpm build && cd -
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Build Python wheel
+        run: |
+          python -m pip install --upgrade pip build
+          cd python/skill_learner_dspy && python -m build --wheel
+
+      - name: Build bootstrap zip (aarch64)
+        run: |
+          chmod +x bootstrap/build-bootstrap.sh bootstrap/postinstall.sh bootstrap/patches/*.sh
+          ./bootstrap/build-bootstrap.sh aarch64
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Build release APK (unsigned)
+        working-directory: android
+        run: ./gradlew --no-daemon assembleRelease || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pocket-pi-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Attach to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/app/build/outputs/apk/debug/app-debug.apk

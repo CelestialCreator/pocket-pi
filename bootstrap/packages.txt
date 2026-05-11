@@ -1,0 +1,6 @@
+nodejs
+python
+git
+ripgrep
+termux-api
+openssl

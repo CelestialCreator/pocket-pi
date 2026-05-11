@@ -1,0 +1,8 @@
+{
+  "askClaude": {
+    "enabled": true,
+    "allowFullMode": false,
+    "defaultIsolated": false,
+    "description": "Delegate a focused task or question to Claude Code. Use when you need deep code reading, multi-step planning, or a second opinion. Read-only by default; the user has disabled `full` mode on this device for safety."
+  }
+}

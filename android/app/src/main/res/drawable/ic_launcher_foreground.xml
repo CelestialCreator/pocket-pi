@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Greek letter Pi (π), centered in the 108x108 safe area (66dp inner). -->
+    <group android:translateX="27" android:translateY="27">
+        <path
+            android:fillColor="#EFEFEF"
+            android:pathData="M6,12
+                L48,12
+                L48,18
+                L40,18
+                L40,42
+                C40,46 41,48 44,48
+                L48,48
+                L48,54
+                L42,54
+                C36,54 32,52 32,46
+                L32,18
+                L20,18
+                L20,46
+                C20,52 16,54 10,54
+                L6,54
+                L6,48
+                L10,48
+                C13,48 14,46 14,42
+                L14,18
+                L6,18
+                Z" />
+    </group>
+</vector>

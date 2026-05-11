@@ -1,0 +1,24 @@
+{
+  "name": "pi-skill-learner",
+  "version": "0.1.0",
+  "description": "Hermes-style closed learning loop for Pi. Watches successful turn patterns and proposes new Skills, dispatching reflection to either pk-pi-hermes-evolve (TS, via claude-bridge) or skill_learner_dspy (Python, via NVIDIA NIM).",
+  "license": "MIT",
+  "author": "Pocket Pi contributors",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "keywords": ["pi-package", "pi", "extension", "skills", "learning-loop", "hermes"],
+  "pi": {
+    "extensions": ["dist/index.js"]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}
