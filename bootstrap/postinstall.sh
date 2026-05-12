@@ -195,26 +195,29 @@ if [ -f "$ETC/patches/node-pty-stub.js" ] && [ -d "$NODE_PTY_PKG" ]; then
   echo "==> node-pty stub installed; src/ removed so tsx uses lib/"
 fi
 
-# --- 3b. Seed default provider/model ---------------------------------------
-# Pi reads defaultProvider/defaultModel from settings.json at boot to pick
-# the active model. Without these, the dashboard's model picker has nothing
-# selected and prompts have nowhere to go. Set NVIDIA's Qwen3 Coder 480B as
-# the default (free); only if the user hasn't already chosen.
+# --- 3b. Clean settings.json (no default provider preseed) ------------------
+# Earlier builds preseeded `defaultProvider=nvidia` so a fresh install could
+# chat immediately against free NVIDIA NIM. Pulled now: it bakes in an
+# implicit "NVIDIA is the recommended provider" without a real key behind
+# it, and the dashboard's first-run UX is better when it prompts the user
+# to pick a provider through its native settings UI. NVIDIA stays available
+# in models.json as one option among several — no preference applied.
 SETTINGS="$HOME/.pi/agent/settings.json"
-python3 - "$SETTINGS" <<'PY'
+python3 - "$SETTINGS" <<'PY' || echo "WARN: settings.json cleanup skipped"
 import json, pathlib, sys
 p = pathlib.Path(sys.argv[1])
 data = {}
 if p.exists():
     try: data = json.loads(p.read_text())
     except Exception: data = {}
-data.setdefault("defaultProvider", "nvidia")
-data.setdefault("defaultModel", "qwen/qwen3-coder-480b-a35b-instruct")
+# Strip any legacy preseeded defaults; modern flow has the dashboard prompt.
+data.pop("defaultProvider", None)
+data.pop("defaultModel", None)
 # Strip any legacy pi-webserver block — the dashboard is the UI now.
 data.pop("pi-webserver", None)
 p.parent.mkdir(parents=True, exist_ok=True)
 p.write_text(json.dumps(data, indent=2))
-print(f"merged default model into {p}")
+print(f"cleaned settings.json defaults at {p}")
 PY
 
 # --- 3c. Write dashboard tool overrides ------------------------------------

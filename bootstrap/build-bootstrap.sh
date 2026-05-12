@@ -49,14 +49,15 @@ chmod +x "$WORK/prefix/etc/pocket-pi/postinstall.sh"
 chmod +x "$WORK/prefix/etc/pocket-pi/patches/"*.sh
 
 # 2. HOME skel — copied into the user's $HOME on first launch by postinstall.
+# No api-key placeholders: provider keys are user-supplied through the
+# dashboard's settings UI on first run. Pre-creating a stub file for any
+# specific provider would imply we're endorsing it.
 SKEL="$WORK/prefix/etc/pocket-pi/skel"
-mkdir -p "$SKEL/.pi/agent/skills/proposed" "$SKEL/.config/nvidia"
+mkdir -p "$SKEL/.pi/agent/skills/proposed"
 cp "$ROOT/config/AGENTS.md"          "$SKEL/.pi/agent/AGENTS.md"
 cp "$ROOT/config/claude-bridge.json" "$SKEL/.pi/agent/claude-bridge.json"
 cp "$ROOT/config/models.json"        "$SKEL/.pi/agent/models.json"
 cp -R "$ROOT/skills/."               "$SKEL/.pi/agent/skills/"
-: > "$SKEL/.config/nvidia/api-key"
-chmod 600 "$SKEL/.config/nvidia/api-key"
 
 # 3. Repack
 OUT="$DIST/bootstrap-${ARCH}.zip"

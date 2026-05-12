@@ -6,10 +6,10 @@ A [Pi coding agent](https://pi.dev/) shipped as an Android APK. No Termux instal
 
 ## Install (team testers)
 
-1. Grab the latest APK — **v0.2.0** — from the [Releases page](https://github.com/CelestialCreator/pocket-pi/releases/latest), or directly: [pocket-pi-v0.2.0.apk](https://github.com/CelestialCreator/pocket-pi/releases/download/v0.2.0/pocket-pi-v0.2.0.apk).
-2. Sideload — tap the APK on the phone (allow install from unknown sources for your browser/file manager), or `adb install pocket-pi-v0.2.0.apk`.
+1. Grab the latest APK — **v0.2.1** — from the [Releases page](https://github.com/CelestialCreator/pocket-pi/releases/latest), or directly: [pocket-pi-v0.2.1.apk](https://github.com/CelestialCreator/pocket-pi/releases/download/v0.2.1/pocket-pi-v0.2.1.apk).
+2. Sideload — tap the APK on the phone (allow install from unknown sources for your browser/file manager), or `adb install pocket-pi-v0.2.1.apk`.
 3. Open the app. First launch runs the bootstrap (3–5 min on Wi-Fi: extracts Termux, installs Node + npm packages, registers Pi extensions).
-4. Once the dashboard loads, tap its **⚙** in the top-right of the page chrome to add provider API keys, switch models, edit AGENTS.md, etc. NVIDIA NIM is pre-seeded (free) so you can chat immediately; OpenRouter / OpenAI / Anthropic / Groq are also wired up — paste a key (or use the Claude Pro/Max OAuth Sign-In, which opens your device's default browser) and pick a model.
+4. Once the dashboard loads, tap its **⚙** in the top-right of the page chrome to add a provider. Wired up: OpenAI, Anthropic (API key or Claude Pro/Max OAuth Sign-In), Google Gemini, Groq, Mistral, NVIDIA NIM, OpenRouter, plus device-code OAuth for ChatGPT / GitHub Copilot. Paste a key (or sign in via OAuth — opens your device's default browser), pick a model, save.
 5. Chat away.
 
 If the dashboard never finishes binding, the loading screen surfaces **Restart Pi** and **Re-run setup** buttons after a 15-second stall — those re-kick the service and re-run the bootstrap installer respectively. As a last resort, force-stop the app from Android Settings and reopen; the install state on disk is preserved.
@@ -73,7 +73,7 @@ The current build uses `applicationId = com.termux` so the upstream Termux boots
 |---|---|
 | Single-APK install on aarch64 phones | ✓ |
 | pi-agent-dashboard as the WebView UI (slash commands, model switcher, session history all native) | ✓ |
-| NVIDIA NIM + OpenRouter end-to-end (chat, tool use, cost tracking) | ✓ |
+| OpenAI / Anthropic API / NVIDIA NIM / OpenRouter end-to-end (chat, tool use, cost tracking); Claude Pro/Max OAuth round-trips through the device's default browser | ✓ |
 | Recovery UI when the dashboard doesn't bind within 15s (inline Restart Pi / Re-run setup buttons) | ✓ |
 | `pi-anthropic-messages` for tool-call rendering | ✓ |
 | Shell-session feature inside the dashboard | not yet — `node-pty` has no android-arm64 prebuild and is stubbed; chat/files/tasks work, terminal tab will fail |
@@ -86,4 +86,4 @@ MIT. Third-party runtime components keep their own licenses (Termux GPL, Pi MIT)
 
 ## Status
 
-v0.2.0 — POC, shippable. The Termux-fork-inside-an-APK approach works: pi-agent-dashboard is the chat UI, single-tap APK install handles the rest. Whether to invest in productizing it (custom prefix bootstrap, real applicationId, signed release builds, Play Store, etc.) or rewrite this as a proper native Android client that talks to Pi over the network is the question this POC is meant to inform.
+v0.2.1 — POC, shippable. The Termux-fork-inside-an-APK approach works: pi-agent-dashboard is the chat UI, single-tap APK install handles the rest. Whether to invest in productizing it (custom prefix bootstrap, real applicationId, signed release builds, Play Store, etc.) or rewrite this as a proper native Android client that talks to Pi over the network is the question this POC is meant to inform.
