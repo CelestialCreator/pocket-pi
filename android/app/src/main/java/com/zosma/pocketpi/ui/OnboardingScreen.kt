@@ -31,7 +31,7 @@ import kotlinx.coroutines.withContext
  * Three-step onboarding:
  *   1. Extract bootstrap zip + run postinstall.sh (npm i -g, pip install,
  *      apply hermes-evolve patch).
- *   2. Provider auth (handled inside the pi-mobile PWA's Settings tab).
+ *   2. Provider auth (entered in the Compose Config sheet — ⚙ FAB).
  *   3. Permissions + battery-optimisation exemption.
  *
  * Step 1 is the only one we run automatically; 2 and 3 are surfaced as

@@ -14,18 +14,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -34,33 +31,35 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import com.zosma.pocketpi.config.ConfigStore
 import com.zosma.pocketpi.pi.Bootstrapper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 
 /**
- * Single-WebView surface backed by pi-mobile.
+ * Single-WebView surface backed by pi-agent-dashboard on :8000.
  *
  * Lifecycle states:
  *   1. Server not yet up (first run = postinstall, returning users = bind wait)
  *      → live tail of postinstall.log + status + Retry button
  *   2. Server up
- *      → WebView posts apiToken to /_auth/login, redirects to /mobile
+ *      → WebView loads http://127.0.0.1:8000/ directly (no auth — localhost
+ *        is unguarded for the dashboard).
  */
+private const val DASHBOARD_PORT = 8000
 @Composable
 fun WebViewScreen() {
     val ctx = LocalContext.current
@@ -78,59 +77,34 @@ fun WebViewScreen() {
         resolved.onSuccess { info = it }.onFailure { error = it.message }
     }
 
-    var showConfig by remember { mutableStateOf(false) }
-
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         when {
-            error != null -> ErrorPane(error!!, logTail, onRetry = { attempt++ }, onConfig = { showConfig = true })
-            info == null -> LoadingPane(phase, logTail, onConfig = { showConfig = true })
+            error != null -> ErrorPane(error!!, logTail, onRetry = { attempt++ })
+            info == null -> LoadingPane(phase, logTail)
             else -> Web(info!!)
-        }
-        // ⚙ FAB is always rendered, in every state, so a user can reach
-        // Re-run setup / Restart Pi from the loading screen too — the most
-        // common bind-stuck recovery path.
-        FilledIconButton(
-            onClick = { showConfig = true },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 6.dp, end = 6.dp)
-                .size(36.dp),
-            shape = CircleShape,
-            colors = IconButtonDefaults.filledIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
-                contentColor = MaterialTheme.colorScheme.onSurface,
-            ),
-        ) {
-            Text("⚙", style = MaterialTheme.typography.titleMedium)
-        }
-        if (showConfig) {
-            ConfigSheet(onDismiss = { showConfig = false })
         }
     }
 }
 
-private data class WebserverInfo(val port: Int, val token: String)
+private data class WebserverInfo(val port: Int)
 
 private suspend fun runWaitLoop(
     ctx: Context,
     onProgress: (phase: String, logTail: String) -> Unit,
 ): Result<WebserverInfo> {
-    val infoFile = File(Bootstrapper.homeDir(ctx), ".pi/agent/webserver-info.json")
     val logFile = File(Bootstrapper.homeDir(ctx), ".pi/agent/postinstall.log")
+    val readyMarker = File(Bootstrapper.homeDir(ctx), ".pi/agent/postinstall.log") // postinstall log exists once setup ran
     val deadline = System.currentTimeMillis() + 25 * 60 * 1000L
     while (System.currentTimeMillis() < deadline) {
         val tail = readTail(logFile, 18)
+        if (probe(DASHBOARD_PORT)) {
+            onProgress("Connected", tail)
+            return Result.success(WebserverInfo(DASHBOARD_PORT))
+        }
         val phase = when {
-            !infoFile.exists() && !logFile.exists() -> "Preparing first-run install…"
-            !infoFile.exists() -> "Installing packages (apt + npm). 5–10 min on first launch."
-            else -> {
-                val parsed = parseInfo(infoFile)
-                if (parsed != null && probe(parsed.port)) {
-                    onProgress("Connected", tail)
-                    return Result.success(parsed)
-                }
-                "Pi installed. Waiting for the web server to bind…"
-            }
+            !logFile.exists() -> "Preparing first-run install…"
+            !readyMarker.exists() -> "Installing packages (apt + npm). 5–10 min on first launch."
+            else -> "Pi installed. Waiting for the dashboard to bind :8000…"
         }
         onProgress(phase, tail)
         delay(2000)
@@ -139,11 +113,6 @@ private suspend fun runWaitLoop(
         "Pi didn't come up within 25 minutes. Check the log below; tap Retry once it looks finished."
     ))
 }
-
-private fun parseInfo(f: File): WebserverInfo? = runCatching {
-    val obj = JSONObject(f.readText())
-    WebserverInfo(port = obj.optInt("port", 4100), token = obj.optString("token"))
-}.getOrNull()?.takeIf { it.token.isNotEmpty() }
 
 private fun readTail(f: File, n: Int): String {
     if (!f.exists()) return ""
@@ -163,11 +132,11 @@ private fun probe(port: Int): Boolean = runCatching {
 }.getOrDefault(false)
 
 @Composable
-private fun LoadingPane(phase: String, logTail: String, onConfig: () -> Unit) {
+private fun LoadingPane(phase: String, logTail: String) {
     // After 15s the bind wait has crossed the "something is probably wrong"
-    // threshold (returning users: pi-webserver should bind within a few
-    // seconds of service start). Surface the recovery escape hatch so the
-    // user doesn't have to discover the corner FAB.
+    // threshold (returning users: the dashboard should bind within a few
+    // seconds of service start). Surface the recovery buttons so a wedged
+    // bootstrap isn't a dead end.
     var stalled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(15_000)
@@ -192,11 +161,11 @@ private fun LoadingPane(phase: String, logTail: String, onConfig: () -> Unit) {
         if (stalled) {
             Spacer(Modifier.height(8.dp))
             Text(
-                "Taking longer than expected. Open setup options to restart Pi or re-run the installer.",
+                "Taking longer than expected. Restart Pi or re-run the installer.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Button(onClick = onConfig) { Text("Open setup options") }
+            RecoveryActions()
         }
     }
 }
@@ -206,7 +175,6 @@ private fun ErrorPane(
     message: String,
     logTail: String,
     onRetry: () -> Unit,
-    onConfig: () -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
@@ -215,11 +183,67 @@ private fun ErrorPane(
         Text("Pi didn't start", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.error)
         Text(message, style = MaterialTheme.typography.bodyMedium)
         Button(onClick = onRetry) { Text("Retry") }
-        OutlinedButton(onClick = onConfig) { Text("Open setup options") }
+        RecoveryActions()
         if (logTail.isNotEmpty()) {
             Text("Install log (last 18 lines):", style = MaterialTheme.typography.labelSmall)
             Text(logTail, style = MaterialTheme.typography.bodySmall)
         }
+    }
+}
+
+/**
+ * Two-button row that replaces the old ⚙ → ConfigSheet recovery path.
+ * "Restart Pi" kicks the service so it respawns pi + dashboard. "Re-run setup"
+ * refreshes the bundled scripts from the APK asset and runs postinstall again
+ * (streaming progress to [setupLog]). Both actions are idempotent — chat
+ * sessions persist on disk via pi's session store.
+ */
+@Composable
+private fun RecoveryActions() {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var status by remember { mutableStateOf("") }
+    var setupLog by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedButton(
+            enabled = !busy,
+            onClick = {
+                scope.launch {
+                    withContext(Dispatchers.IO) { ConfigStore.restartPi() }
+                    status = "Pi restarted"
+                }
+            },
+        ) { Text("Restart Pi") }
+        OutlinedButton(
+            enabled = !busy,
+            onClick = {
+                scope.launch {
+                    busy = true
+                    setupLog = ""
+                    status = "Running setup…"
+                    withContext(Dispatchers.IO) {
+                        ConfigStore.rerunSetup(ctx) { line ->
+                            setupLog = (setupLog + "\n" + line).takeLast(2000)
+                        }
+                    }
+                    withContext(Dispatchers.IO) { ConfigStore.restartPi() }
+                    busy = false
+                    status = "Setup complete — Pi restarted"
+                }
+            },
+        ) { Text("Re-run setup") }
+    }
+    if (status.isNotEmpty()) {
+        Text(status, style = MaterialTheme.typography.bodySmall)
+    }
+    if (setupLog.isNotEmpty()) {
+        Text("Setup log:", style = MaterialTheme.typography.labelSmall)
+        Text(
+            setupLog,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+        )
     }
 }
 
@@ -243,61 +267,39 @@ private fun Web(info: WebserverInfo) {
                     builtInZoomControls = false
                     allowFileAccess = false
                     allowContentAccess = false
-                    // Standard mobile-viewport settings. pi-mobile's
-                    // `html,body { height: 100% }` chain would normally
-                    // collapse to 0px in WebView, but the onPageFinished
-                    // injection below anchors the layout to window.innerHeight.
                     useWideViewPort = true
                     loadWithOverviewMode = true
-                    // Strip the `; wv` identifier so pi-mobile's UA detection
-                    // treats us like regular Chrome (some PWAs render a
-                    // degraded layout for in-app WebViews).
+                    // Strip the `; wv` identifier so the dashboard's UA
+                    // detection treats us like regular Chrome — some web
+                    // apps render a degraded layout when they spot a WebView.
                     userAgentString = (userAgentString ?: "")
                         .replace(Regex("; wv\\)"), ")")
-                        .plus(" PocketPi/0.1")
+                        .plus(" PocketPi/0.2")
                 }
                 setBackgroundColor(0xFF000000.toInt())
                 // Allow chrome://inspect → DevTools from desktop Chrome.
                 WebView.setWebContentsDebuggingEnabled(true)
+                // The dashboard's root container resolves to height:0 in
+                // Android WebView (same `html,body{height:100%}` collapse
+                // we fought on pi-mobile). Anchor it to a real pixel
+                // height derived from window.innerHeight, and refresh on
+                // visualViewport changes so the input bar tracks the keyboard.
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
-                        // pi-mobile's `html,body,#app { height: 100% }` chain
-                        // resolves to 0 in Android WebView. Anchor it to a
-                        // real pixel height derived from window.innerHeight,
-                        // and refresh on visualViewport changes so the input
-                        // bar tracks the keyboard.
                         view?.evaluateJavascript(
                             """
                             (function(){
                               if (document.getElementById('pocketpi-fix')) return;
                               var s = document.createElement('style');
                               s.id = 'pocketpi-fix';
-                              // Android WebView ghosts the bottom-anchored
-                              // scrollable tab bar to the top of the viewport
-                              // (GPU compositing layer leak). Three things to
-                              // suppress it:
-                              //   1. Kill the legacy momentum-scroll layer
-                              //      that's the actual trigger.
-                              //   2. Hard-clip the tab content so the leaked
-                              //      pixels can't escape upward.
-                              //   3. Put the tab bar in its own painting
-                              //      context with overflow:clip on the
-                              //      body, which blocks Chromium's full-page
-                              //      compositor pass.
-                              s.textContent = [
-                                'html,body,#app{height:100dvh;min-height:100dvh;',
-                                  'height:var(--pp-h);min-height:var(--pp-h);}',
-                                'html,body{overflow:clip;}',
-                                '#app{overflow:hidden;contain:strict;',
-                                  'transform:translateZ(0);}',
-                                '.tab-content{overflow-y:auto;overflow-x:hidden;',
-                                  'contain:paint;}',
-                                '.tab-bar{-webkit-overflow-scrolling:auto!important;',
-                                  'overflow-x:auto;overflow-y:hidden;',
-                                  'transform:translateZ(0);isolation:isolate;',
-                                  'contain:strict;height:56px;',
-                                  'position:relative;z-index:2;}',
-                              ].join('');
+                              // Force a real pixel height on every node that
+                              // would otherwise rely on `100dvh` (Tailwind's
+                              // `h-[100dvh]` resolves to 0 in WebView 113
+                              // even though CSS.supports returns true).
+                              s.textContent =
+                                'html,body,#root,#root>*{height:var(--pp-h)!important;min-height:var(--pp-h)!important;}'+
+                                'html,body{margin:0;overflow:hidden;}'+
+                                '[class*="h-[100dvh]"],[class*="h-[100vh]"],[class*="min-h-[100dvh]"],[class*="min-h-[100vh]"]{height:var(--pp-h)!important;min-height:var(--pp-h)!important;}';
                               document.head.appendChild(s);
                               function set(){
                                 document.documentElement.style.setProperty(
@@ -313,38 +315,6 @@ private fun Web(info: WebserverInfo) {
                             """.trimIndent(),
                             null,
                         )
-                        view?.evaluateJavascript(
-                            """
-                            (function(){
-                              function r(sel){var e=document.querySelector(sel);if(!e)return null;var b=e.getBoundingClientRect();return {x:b.x|0,y:b.y|0,w:b.width|0,h:b.height|0};}
-                              function dumpAll(sel){var out=[];document.querySelectorAll(sel).forEach(function(e){var b=e.getBoundingClientRect();out.push({x:b.x|0,y:b.y|0,w:b.width|0,h:b.height|0});});return out;}
-                              function probe(x,y){var e=document.elementFromPoint(x,y);if(!e)return null;var b=e.getBoundingClientRect();return {tag:e.tagName,cls:(e.className||'').toString().slice(0,40),txt:(e.textContent||'').replace(/\s+/g,' ').slice(0,30),x:b.x|0,y:b.y|0,w:b.width|0,h:b.height|0};}
-                              var dump = {
-                                url: location.href,
-                                ww: window.innerWidth, wh: window.innerHeight,
-                                vv: window.visualViewport ? {w:window.visualViewport.width|0, h:window.visualViewport.height|0} : null,
-                                html_h: getComputedStyle(document.documentElement).height,
-                                body_h: getComputedStyle(document.body).height,
-                                body_disp: getComputedStyle(document.body).display,
-                                body: r('body'),
-                                app: r('#app'),
-                                header: r('.header'),
-                                tab_content: r('.tab-content'),
-                                tab_bar: r('.tab-bar'),
-                                input_bar: r('.chat-input-bar'),
-                                all_tab_bars: dumpAll('.tab-bar'),
-                                all_tab_items: dumpAll('.tab-item').length,
-                                ghost_60_185: probe(60, 185),
-                                ghost_130_185: probe(130, 185),
-                                ghost_200_185: probe(200, 185),
-                                ghost_270_185: probe(270, 185),
-                                ghost_340_185: probe(340, 185),
-                              };
-                              console.log('LAYOUT_DUMP=' + JSON.stringify(dump));
-                            })();
-                            """.trimIndent(),
-                            null,
-                        )
                     }
                 }
                 webChromeClient = object : WebChromeClient() {
@@ -356,8 +326,8 @@ private fun Web(info: WebserverInfo) {
                 }
                 addJavascriptInterface(NativeBridge(ctx), "PocketPi")
 
-                val body = "token=${URLEncoder.encode(info.token, "UTF-8")}&redirect=/mobile"
-                postUrl("http://127.0.0.1:${info.port}/_auth/login", body.toByteArray(Charsets.UTF_8))
+                // Localhost is unguarded for pi-agent-dashboard; no auth POST.
+                loadUrl("http://127.0.0.1:${info.port}/")
             }
         },
     )

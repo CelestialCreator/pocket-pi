@@ -24,7 +24,7 @@ import com.zosma.pocketpi.ui.theme.PocketPiTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Keep the system insets ours — pi-mobile already handles its own
+        // Keep the system insets ours — the dashboard handles its own
         // safe-area math via the viewport meta and dvh units.
         WindowCompat.setDecorFitsSystemWindows(window, true)
         setContent {
