@@ -11,8 +11,8 @@ What Pocket Pi adds is the packaging: a Termux runtime, postinstall script, an A
 
 ## Install
 
-1. Grab the latest APK — **v0.3.0** — from the [Releases page](https://github.com/CelestialCreator/pocket-pi/releases/latest), or directly: [pocket-pi-v0.3.0.apk](https://github.com/CelestialCreator/pocket-pi/releases/download/v0.3.0/pocket-pi-v0.3.0.apk) (40 MB, aarch64 only).
-2. Sideload — tap the APK on the phone (allow install from unknown sources for your browser/file manager), or `adb install pocket-pi-v0.3.0.apk`.
+1. Grab the latest APK — **v0.4.0** — from the [Releases page](https://github.com/CelestialCreator/pocket-pi/releases/latest), or directly: [pocket-pi-v0.4.0.apk](https://github.com/CelestialCreator/pocket-pi/releases/download/v0.4.0/pocket-pi-v0.4.0.apk) (68 MB, aarch64 only).
+2. Sideload — tap the APK on the phone (allow install from unknown sources for your browser/file manager), or `adb install pocket-pi-v0.4.0.apk`.
 3. Open the app. First launch runs the bootstrap (3–5 min on Wi-Fi: extracts Termux, installs Node + npm packages, registers Pi extensions).
 4. When the dashboard loads, tap its **⚙** (top-right of the page chrome) → **Providers** → add at least one provider. See [Providers — what works](#providers--what-works) below.
 5. Pick a model, chat away.
@@ -90,7 +90,7 @@ cd ../../android && ./gradlew :app:assembleDebug
 
 The current build uses `applicationId = com.termux` so the upstream Termux bootstrap binaries (which bake in the path `/data/data/com.termux/files/usr`) work without recompiling. To ship under a real app id, run `bootstrap/rebuild-with-prefix.sh` (Docker, 4–12 h on Apple Silicon) to produce a bootstrap pinned to a custom prefix, then flip `applicationId` in `android/app/build.gradle.kts`.
 
-## What works / what doesn't (v0.3.0)
+## What works / what doesn't (v0.4.0)
 
 | | Status |
 |---|---|
