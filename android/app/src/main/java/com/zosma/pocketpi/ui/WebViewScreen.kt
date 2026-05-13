@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -60,6 +61,9 @@ import java.net.URL
  *        is unguarded for the dashboard).
  */
 private const val DASHBOARD_PORT = 8000
+private const val PREFS = "pocketpi"
+private const val PREF_ACCESSIBILITY_DISMISSED = "accessibility_pane_dismissed"
+
 @Composable
 fun WebViewScreen() {
     val ctx = LocalContext.current
@@ -68,6 +72,24 @@ fun WebViewScreen() {
     var phase by remember { mutableStateOf("Starting Pi…") }
     var logTail by remember { mutableStateOf("") }
     var attempt by remember { mutableStateOf(0) }
+
+    // Accessibility service polled every 2s. Re-evaluates the AccessibilityPane
+    // visibility — the user may toggle it on in Settings while the app is open.
+    var accessibilityOn by remember {
+        mutableStateOf(com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance() != null)
+    }
+    var accessibilityDismissed by remember {
+        mutableStateOf(
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(PREF_ACCESSIBILITY_DISMISSED, false),
+        )
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            accessibilityOn = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance() != null
+            delay(2000)
+        }
+    }
 
     LaunchedEffect(attempt) {
         info = null; error = null
@@ -81,6 +103,26 @@ fun WebViewScreen() {
         when {
             error != null -> ErrorPane(error!!, logTail, onRetry = { attempt++ })
             info == null -> LoadingPane(phase, logTail)
+            // Once the dashboard is up, if Accessibility isn't enabled and the
+            // user hasn't dismissed the nudge, show the pane. Skippable — chat
+            // works without it; UI tools just return 403 until toggled on.
+            !accessibilityOn && !accessibilityDismissed -> AccessibilityPane(
+                onOpenSettings = {
+                    runCatching {
+                        ctx.startActivity(
+                            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                },
+                onSkip = {
+                    ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(PREF_ACCESSIBILITY_DISMISSED, true)
+                        .apply()
+                    accessibilityDismissed = true
+                },
+            )
             else -> Web(info!!)
         }
     }
@@ -188,6 +230,56 @@ private fun ErrorPane(
             Text("Install log (last 18 lines):", style = MaterialTheme.typography.labelSmall)
             Text(logTail, style = MaterialTheme.typography.bodySmall)
         }
+    }
+}
+
+/**
+ * One-time nudge shown after the dashboard binds, if the user hasn't yet
+ * enabled the Pocket Pi Accessibility service. Pocket Pi's UI-automation
+ * tools (taps, swipes, screen reading, screenshot, notification listening)
+ * require the user to manually toggle this on in Settings → Accessibility —
+ * Android forbids any runtime-dialog shortcut for accessibility permissions.
+ *
+ * Skippable: chat still works without it, UI tools just return 403. The
+ * pane resurfaces only after a fresh install (PREF_ACCESSIBILITY_DISMISSED
+ * is set on skip).
+ */
+@Composable
+private fun AccessibilityPane(onOpenSettings: () -> Unit, onSkip: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text("Phone control — one tap to enable", style = MaterialTheme.typography.headlineSmall)
+        Text(
+            "Pi can read and act on other apps' screens — open WhatsApp + send a " +
+                "message, summarize what's on the current screen, react to incoming " +
+                "notifications, take screenshots, etc. This needs Accessibility " +
+                "permission, which Android only grants via the system Settings " +
+                "screen (no in-app dialog).",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            "What you'll do: tap Open Settings → tap \"Pocket Pi\" in the list → " +
+                "toggle on → confirm. One-time setup; the toggle stays on across reboots.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(onClick = onOpenSettings, modifier = Modifier.fillMaxSize().height(48.dp)) {
+            Text("Open Settings → Accessibility")
+        }
+        OutlinedButton(onClick = onSkip, modifier = Modifier.fillMaxSize().height(48.dp)) {
+            Text("Skip for now — chat without phone control")
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Nothing leaves the device. The accessibility surface is vendored from " +
+                "github.com/KarryViber/orb-eye (MIT) and gated by Pocket Pi's per-launch " +
+                "bearer token. You can disable it any time in Settings → Accessibility.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

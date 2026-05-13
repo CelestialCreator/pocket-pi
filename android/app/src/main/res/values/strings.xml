@@ -14,4 +14,6 @@
     <string name="service_running">Pocket Pi is running</string>
     <string name="service_channel_name">Pocket Pi background</string>
     <string name="service_channel_desc">Keeps Pi alive while you use the app.</string>
+    <string name="accessibility_service_label">Pocket Pi</string>
+    <string name="accessibility_service_description">Lets the Pi agent read other apps’ screens and dispatch taps, swipes, text input, and gestures. Required for UI-automation tools and proactive notification responses. Vendored from KarryViber/orb-eye (MIT). Nothing leaves the device.</string>
 </resources>

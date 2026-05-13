@@ -1,6 +1,6 @@
 {
   "name": "pi-termux-tools",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Pi extension exposing the Pocket Pi phone surface as agent tools — notifications, intents, share, camera, mic, location, clipboard, inbox. Routes through Pocket Pi's localhost HTTP bridge; no Termux:API companion APK required.",
   "license": "MIT",
   "author": "Pocket Pi contributors",

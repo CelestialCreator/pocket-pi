@@ -107,7 +107,7 @@ The current build uses `applicationId = com.termux` so the upstream Termux boots
 | Recovery UI when the dashboard doesn't bind within 15s (inline Restart Pi / Re-run setup buttons) | ✓ |
 | Other OAuth providers (Gemini CLI, ChatGPT Codex, GitHub Copilot, Antigravity) | sign-in completes but no models — Pi-side protocol bridges not bundled. Use the API-key path instead. |
 | Shell-session feature inside the dashboard | not yet — `node-pty` has no android-arm64 prebuild and is stubbed; chat/files/tasks work, terminal tab will fail |
-| Mobile UI automation (the agent driving other apps) | not yet — deferred to v0.4; needs an Accessibility Service (the user has to enable it manually in Settings, no runtime dialog exists). Plan is to vendor [droidrun/droidrun-portal](https://github.com/droidrun/droidrun-portal). |
+| **Mobile UI automation** (the agent reading other apps' screens, dispatching taps/swipes/text input/gestures, polling notifications + window-change events) | ✓ — new in v0.4.0. AccessibilityService vendored from [KarryViber/orb-eye](https://github.com/KarryViber/orb-eye) (MIT). One-time manual toggle in Settings → Accessibility → Pocket Pi (Android forbids runtime enablement). |
 | Background location ("Allow all the time") | not yet — foreground only this release. Add the Settings escalation when a real use case appears. |
 | `applicationId` ≠ `com.termux` | not yet — requires custom bootstrap rebuild |
 | Old Android WebView builds (Chrome < ~120) | emulator system images ship stale WebView; real devices auto-update — confirmed working in Chrome 140+ |
@@ -119,6 +119,7 @@ Pocket Pi is just packaging. The actual agent engine and the chat UI are someone
 - **Pi coding agent** — [Mario Zechner](https://github.com/mariozechner) (original author) and the [earendil-works](https://github.com/earendil-works/pi-coding-agent) maintainers. The runtime that powers every chat turn, tool call, and skill in this app. See [pi.dev](https://pi.dev/).
 - **pi-agent-dashboard** + **pi-anthropic-messages** — [BlackBelt Technology](https://github.com/BlackBeltTechnology). The web chat UI rendered inside the APK's WebView, plus the Anthropic protocol bridge that makes Claude Pro/Max OAuth work end-to-end.
 - **Termux** — the Termux maintainers. The Linux-on-Android runtime that lets us ship Node, Python, and the rest inside a single APK without root or a custom ROM.
+- **orb-eye** — [KarryViber](https://github.com/KarryViber/orb-eye). The AccessibilityService that powers v0.4's UI-automation surface; vendored under MIT with attribution preserved in the source header.
 
 Pi extension ecosystem authors are credited individually in each package's `package.json`; see `bootstrap/npm-packages.txt` for the install list.
 
@@ -128,12 +129,11 @@ MIT for Pocket Pi's own source. Third-party runtime components keep their own li
 
 ## Status
 
-**v0.3.0 — agent has the phone.** Daily-drivable. The Termux-runtime-inside-an-APK approach lands cleanly: single-tap install, dashboard binds the WebView, and the agent now has a real Android surface to act on — notifications, intents (both directions), share-sheet, camera, mic, location, clipboard, deep-link inbox — all gated by a per-launch bearer token over localhost. No companion APK, no root, no shell setup.
+**v0.4.0 — agent has the phone and the screen.** Daily-drivable. On top of the v0.3 phone surface (notifications, intents both directions, share-sheet, camera, mic, location, clipboard, deep-link inbox), v0.4 adds a full UI-automation surface via a vendored [KarryViber/orb-eye](https://github.com/KarryViber/orb-eye) AccessibilityService: the agent can read any app's element tree, find by text/desc/id, dispatch taps / swipes / long-presses / scrolls / multi-finger gestures, set text on focused fields, take screenshots (API 30+), fire global actions (back/home/recents/notifications), buffer system notifications, and long-poll a window-change + notification event channel for proactive behaviour. All gated by the same per-launch bearer token over localhost. No companion APK, no root, no shell setup; one manual Accessibility toggle in Settings on first run (Android requirement — Pocket Pi deep-links there from its onboarding pane).
 
 Roadmap from here, in rough priority order:
 
-- **v0.4 — UI automation.** Vendor [droidrun/droidrun-portal](https://github.com/droidrun/droidrun-portal)'s Kotlin AccessibilityService into the APK so the agent can read screens + dispatch taps/swipes/gestures against other apps. The one irreducible cost: Android forces the user to enable Accessibility in Settings manually (no runtime dialog exists for this permission).
+- **v0.5 — working shell-session tab** in the dashboard once a viable `node-pty` android-arm64 prebuild exists (currently stubbed; terminal tab is the last dashboard feature without backing).
 - **Background location escalation** when a real use case lands ("Allow all the time" → `ACCESS_BACKGROUND_LOCATION`).
 - **More OAuth providers** end-to-end (Gemini CLI, ChatGPT Codex, GitHub Copilot, Antigravity) — each requires a small Pi-side protocol bridge analogous to `pi-anthropic-messages`.
 - **Custom-prefix bootstrap** so `applicationId` can move off `com.termux`. Currently a 4–12 h Docker build on Apple Silicon; once it's clean, the path to a real signed release on Play Store is short.
-- **Working shell-session tab** in the dashboard once a working `node-pty` android-arm64 prebuild exists (currently stubbed).

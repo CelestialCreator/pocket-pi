@@ -16,6 +16,14 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!--
+      AccessibilityService permissions for the vendored orb-eye UI-automation
+      surface. The user must still toggle the service ON in Settings → Accessibility
+      → Pocket Pi; Android forbids any runtime-dialog shortcut for this class
+      of permission. BIND_NOTIFICATION_LISTENER_SERVICE lets the service
+      receive TYPE_NOTIFICATION_STATE_CHANGED events.
+    -->
+    <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
 
     <application
         android:name=".PocketPiApp"
@@ -92,6 +100,30 @@
             android:name=".service.MicFgService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!--
+          Vendored from KarryViber/orb-eye (MIT). Provides UI tree access,
+          gesture dispatch, screenshot, notification capture, and clipboard.
+          Bound by the OS once the user enables the toggle in Settings →
+          Accessibility → Pocket Pi. The service singleton is reachable from
+          our existing PocketPiApiServer via getInstance() so its handlers
+          serve our 127.0.0.1:9998 routes under /ui/*. android:exported=true
+          is REQUIRED by Android's AccessibilityServiceInfo dispatcher; the
+          permission attribute pinning to BIND_ACCESSIBILITY_SERVICE ensures
+          only the system can bind it, not other apps.
+        -->
+        <service
+            android:name=".orbeye.PocketPiAccessibilityService"
+            android:exported="true"
+            android:label="@string/accessibility_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
 
         <provider
             android:name="androidx.core.content.FileProvider"

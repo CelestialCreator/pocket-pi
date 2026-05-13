@@ -276,6 +276,163 @@ internal class Handlers(private val ctx: Context) {
     suspend fun inboxList(): HttpResponse = Inbox.list(ctx)
     suspend fun inboxPop(): HttpResponse = Inbox.pop(ctx)
 
+    // ==========================================================================
+    // UI automation handlers (vendored orb-eye, gated by AccessibilityService).
+    // Every method first checks PocketPiAccessibilityService.getInstance() and
+    // returns 403 with a friendly message if the user hasn't toggled the
+    // service on in Settings → Accessibility → Pocket Pi.
+    // ==========================================================================
+
+    private fun accessibilityNotEnabled(): HttpResponse = HttpResponse(
+        403,
+        PocketPiApiServer.errorJson(
+            "Accessibility service not enabled. Open Pocket Pi, then go to " +
+                "Settings → Accessibility → Pocket Pi → toggle on. This is a " +
+                "one-time setup; the toggle stays on until you turn it off.",
+        ),
+    )
+
+    /** Forwards a body JsonObject to the underlying Java service, parses returned JSON. */
+    private suspend fun ui(call: () -> String): HttpResponse = withContext(Dispatchers.IO) {
+        try {
+            val resultText = call()
+            val parsed = kotlinx.serialization.json.Json.parseToJsonElement(resultText) as JsonObject
+            val ok = (parsed["ok"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "true"
+            HttpResponse(if (ok) 200 else 400, parsed)
+        } catch (e: Throwable) {
+            HttpResponse(500, PocketPiApiServer.errorJson(e.message ?: "ui handler failed"))
+        }
+    }
+
+    private fun toOrgJson(body: JsonObject?): org.json.JSONObject =
+        if (body == null) org.json.JSONObject() else org.json.JSONObject(body.toString())
+
+    suspend fun uiScreen(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        val onlyScrollable = body?.get("scrollable")?.toString()?.contains("true") == true
+        val onlyEditable = body?.get("editable")?.toString()?.contains("true") == true
+        val pkg = body.stringOrNull("package")
+        return ui { svc.getScreenElements(onlyScrollable, onlyEditable, pkg) }
+    }
+
+    suspend fun uiTree(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        val pkg = body.stringOrNull("package")
+        return ui { svc.getUiTree(pkg) }
+    }
+
+    suspend fun uiFocused(): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        return ui { svc.focusedElement }
+    }
+
+    suspend fun uiInfo(): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        return ui { svc.appInfo }
+    }
+
+    suspend fun uiScreenshot(): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        return ui { svc.handleScreenshot() }
+    }
+
+    suspend fun uiFind(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        return ui { svc.handleFind(toOrgJson(body)) }
+    }
+
+    suspend fun uiTap(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        return ui { svc.handleTap(toOrgJson(body)) }
+    }
+
+    suspend fun uiClick(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        return ui { svc.handleClick(toOrgJson(body)) }
+    }
+
+    suspend fun uiType(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        return ui { svc.handleInput(toOrgJson(body)) }
+    }
+
+    suspend fun uiSwipe(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        return ui { svc.handleSwipe(toOrgJson(body)) }
+    }
+
+    suspend fun uiLongPress(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        return ui { svc.handleLongPress(toOrgJson(body)) }
+    }
+
+    suspend fun uiScroll(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        return ui { svc.handleScroll(toOrgJson(body)) }
+    }
+
+    suspend fun uiGesture(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        return ui { svc.handleGesture(toOrgJson(body)) }
+    }
+
+    suspend fun uiGlobal(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        val action = body.stringOrNull("action") ?: return badRequest("action required")
+        return ui { svc.handleGlobalAction(action) }
+    }
+
+    suspend fun uiWait(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        val timeoutMs = (body.numberOrNull("timeoutMs") ?: 5000.0).toLong()
+        return ui { svc.handleWait(timeoutMs) }
+    }
+
+    suspend fun uiNotifications(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        val filterPkg = body.stringOrNull("package")
+        val excludeRaw = body.stringOrNull("exclude") ?: ""
+        val exclude = excludeRaw.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        val clear = body?.get("clear")?.toString()?.contains("true") == true
+        return ui { svc.getNotifications(filterPkg, exclude, clear) }
+    }
+
+    suspend fun uiClipboardGet(): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        return ui { svc.handleClipboardGet() }
+    }
+
+    suspend fun uiClipboardSet(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        return ui { svc.handleClipboardSet(toOrgJson(body)) }
+    }
+
+    suspend fun uiEventsPoll(body: JsonObject?): HttpResponse {
+        val svc = com.zosma.pocketpi.orbeye.PocketPiAccessibilityService.getInstance()
+            ?: return accessibilityNotEnabled()
+        val since = (body.numberOrNull("since") ?: 0.0).toLong()
+        val timeoutMs = (body.numberOrNull("timeoutMs") ?: 30000.0).toLong().coerceIn(0, 60000)
+        return ui { svc.pollEvents(since, timeoutMs) }
+    }
+
     // --- helpers --------------------------------------------------------------
     private fun badRequest(message: String) = HttpResponse(400, PocketPiApiServer.errorJson(message))
     private fun okMessage(text: String) = buildJsonObject { put("ok", true); put("message", text) }

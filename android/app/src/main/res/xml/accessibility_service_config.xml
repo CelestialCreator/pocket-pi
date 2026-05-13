@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Pocket Pi accessibility service configuration. Vendored from
+  KarryViber/orb-eye (MIT). canRetrieveWindowContent=true is required for
+  reading the screen, canPerformGestures=true for tap/swipe/pinch via
+  GestureDescription, canTakeScreenshot=true for the takeScreenshot() API
+  (no-op on API < 30). typeAllMask receives every event class — required
+  for notification capture + window-change signaling for /ui/wait.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:canPerformGestures="true"
+    android:canTakeScreenshot="true"
+    android:notificationTimeout="100"
+    android:description="@string/accessibility_service_description" />

@@ -446,4 +446,329 @@ export default function register(pi: ExtensionAPI): void {
       return tool(() => api("/inbox/pop"));
     },
   });
+
+  // ==========================================================================
+  // UI automation tools — read and act on other apps' screens via the vendored
+  // orb-eye AccessibilityService. All require the user to have toggled
+  // "Pocket Pi" on under Settings → Accessibility. Tools return a friendly
+  // error if the service isn't enabled.
+  //
+  // Typical flow:
+  //   1. pocket_pi_ui_info        — what app is currently in focus?
+  //   2. pocket_pi_ui_find        — locate target element, returns coords
+  //   3. pocket_pi_ui_tap         — tap the coords (or use pocket_pi_ui_click)
+  //   4. pocket_pi_ui_wait        — block until the UI updates
+  //   5. pocket_pi_ui_screen      — read the new screen state
+  // ==========================================================================
+
+  pi.registerTool({
+    name: "pocket_pi_ui_info",
+    label: "UI: App Info",
+    description:
+      "Identify the app currently in focus on the device. Returns the package " +
+      "name (e.g. com.whatsapp) and Activity class so the agent can decide what " +
+      "to do. Cheap; call freely.",
+    parameters: { type: "object", properties: {} },
+    async execute() {
+      return tool(() => api("/ui/info"));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_ui_screen",
+    label: "UI: Read Screen",
+    description:
+      "Return a flat list of visible UI elements with text/desc/bounds + " +
+      "centerX/centerY ready for tapping. Use this to understand what's on " +
+      "screen before deciding to tap or type. Filter with " +
+      "`scrollable=true` for scrollable container contents, `editable=true` " +
+      "for input fields, or `package` to limit to one app.",
+    parameters: {
+      type: "object",
+      properties: {
+        scrollable: { type: "boolean", description: "Only elements inside a scrollable container" },
+        editable: { type: "boolean", description: "Only editable fields" },
+        package: { type: "string", description: "Filter to this package name" },
+      },
+    },
+    async execute(_id, args) {
+      return tool(() =>
+        api("/ui/screen", {
+          scrollable: args.scrollable === true,
+          editable: args.editable === true,
+          package: args.package ? String(args.package) : undefined,
+        }),
+      );
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_ui_find",
+    label: "UI: Find Element",
+    description:
+      "Find a specific UI element by visible text, content-description, or " +
+      "resource ID. Returns its bounds and centerX/centerY ready for " +
+      "pocket_pi_ui_tap. Use when you know what to look for; cheaper than " +
+      "calling pocket_pi_ui_screen first.",
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "Visible text (substring match)" },
+        desc: { type: "string", description: "Content description (substring match)" },
+        id: { type: "string", description: "Android resource ID (exact match)" },
+        clickable: { type: "boolean", description: "Only return clickable elements" },
+        index: { type: "number", description: "Which match to return when multiple (0-based, default 0)" },
+      },
+    },
+    async execute(_id, args) {
+      return tool(() => api("/ui/find", args));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_ui_tap",
+    label: "UI: Tap",
+    description:
+      "Tap at exact screen coordinates. Use after pocket_pi_ui_find returned " +
+      "centerX/centerY for an element. For tapping by text/desc directly in " +
+      "one call, prefer pocket_pi_ui_click.",
+    parameters: {
+      type: "object",
+      properties: {
+        x: { type: "number" },
+        y: { type: "number" },
+        duration: { type: "number", description: "Hold duration ms (default 100)" },
+      },
+      required: ["x", "y"],
+    },
+    async execute(_id, args) {
+      return tool(() => api("/ui/tap", args));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_ui_click",
+    label: "UI: Click by Text",
+    description:
+      "Click an element by visible text, content-description, resource ID, or " +
+      "bounds — a single-call convenience over find+tap. Walks up to the " +
+      "nearest clickable ancestor if the matched node itself isn't clickable.",
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string" },
+        desc: { type: "string" },
+        id: { type: "string" },
+        bounds: { type: "string", description: "Rect.flattenToString form, e.g. '100,200,500,400'" },
+      },
+    },
+    async execute(_id, args) {
+      return tool(() => api("/ui/click", args));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_ui_type",
+    label: "UI: Type Text",
+    description:
+      "Type text into the currently focused input field. By default clears " +
+      "the field first; pass append=true to append, or clear=true alone to " +
+      "clear without typing. CJK input supported.",
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string" },
+        append: { type: "boolean" },
+        clear: { type: "boolean" },
+      },
+    },
+    async execute(_id, args) {
+      return tool(() => api("/ui/type", args));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_ui_swipe",
+    label: "UI: Swipe",
+    description:
+      "Swipe from one point to another. Use for directional gestures (e.g. " +
+      "swipe down to refresh, swipe left to dismiss, navigate carousels).",
+    parameters: {
+      type: "object",
+      properties: {
+        x1: { type: "number" }, y1: { type: "number" },
+        x2: { type: "number" }, y2: { type: "number" },
+        duration: { type: "number", description: "Total ms for the swipe (default 300)" },
+      },
+      required: ["x1", "y1", "x2", "y2"],
+    },
+    async execute(_id, args) {
+      return tool(() => api("/ui/swipe", args));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_ui_scroll",
+    label: "UI: Scroll",
+    description:
+      "Scroll the first scrollable container in the current window, or the " +
+      "scrollable ancestor of a target text. Direction: up/down/left/right. " +
+      "Use `count` to repeat (with 300ms gap).",
+    parameters: {
+      type: "object",
+      properties: {
+        direction: { type: "string", enum: ["up", "down", "left", "right"] },
+        target: { type: "string", description: "Optional: scroll the container that holds this text" },
+        count: { type: "number", description: "Number of scroll actions (default 1)" },
+      },
+      required: ["direction"],
+    },
+    async execute(_id, args) {
+      return tool(() => api("/ui/scroll", args));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_ui_long_press",
+    label: "UI: Long Press",
+    description: "Long-press at coordinates. Useful for context menus, drag handles, etc.",
+    parameters: {
+      type: "object",
+      properties: {
+        x: { type: "number" }, y: { type: "number" },
+        duration: { type: "number", description: "Hold duration ms (default 1000)" },
+      },
+      required: ["x", "y"],
+    },
+    async execute(_id, args) {
+      return tool(() => api("/ui/longpress", args));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_ui_gesture",
+    label: "UI: Custom Gesture",
+    description:
+      "Composite multi-touch gestures. Supports pinch_in / pinch_out " +
+      "(zoom) at a center point, or `multi` for arbitrary multi-stroke " +
+      "paths (e.g. two fingers drawing simultaneously).",
+    parameters: {
+      type: "object",
+      properties: {
+        type: { type: "string", enum: ["pinch_in", "pinch_out", "multi"] },
+        x: { type: "number", description: "Center X for pinch" },
+        y: { type: "number", description: "Center Y for pinch" },
+        distance: { type: "number", description: "Pinch span px (default 200)" },
+        durationMs: { type: "number" },
+        strokes: {
+          type: "array",
+          description:
+            "For type=multi: array of {path:[[x,y],…], startMs, durationMs}",
+        },
+      },
+      required: ["type"],
+    },
+    async execute(_id, args) {
+      return tool(() => api("/ui/gesture", args));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_ui_global",
+    label: "UI: System Action",
+    description:
+      "Perform a system-wide action: back, home, recents, notifications " +
+      "(pull-down shade), quick_settings, power_dialog.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["back", "home", "recents", "notifications", "quick_settings", "power_dialog"],
+        },
+      },
+      required: ["action"],
+    },
+    async execute(_id, args) {
+      return tool(() => api("/ui/global", args));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_ui_wait",
+    label: "UI: Wait for Change",
+    description:
+      "Block until the UI changes (window state change or window content " +
+      "change) or the timeout elapses. Useful after a tap that triggers " +
+      "navigation — avoids polling pocket_pi_ui_screen in a loop. Returns " +
+      "{changed: true|false} so the agent knows whether the wait fired.",
+    parameters: {
+      type: "object",
+      properties: {
+        timeoutMs: { type: "number", description: "Max wait ms (default 5000)" },
+      },
+    },
+    async execute(_id, args) {
+      return tool(() => api("/ui/wait", args));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_ui_notifications",
+    label: "UI: System Notifications",
+    description:
+      "Return the buffered system notifications captured by the accessibility " +
+      "service (last 50). Each has {timestamp, package, title, body, text, " +
+      "bigText}. Use `clear=true` to drain the buffer after reading; " +
+      "`package=` to filter to one app; `exclude=` (comma-separated) to drop " +
+      "system noise like systemui, gms.",
+    parameters: {
+      type: "object",
+      properties: {
+        package: { type: "string", description: "Filter to this package only" },
+        exclude: { type: "string", description: "Comma-separated packages to exclude" },
+        clear: { type: "boolean", description: "Drain the buffer after reading" },
+      },
+    },
+    async execute(_id, args) {
+      return tool(() => api("/ui/notifications", args));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_ui_screenshot",
+    label: "UI: Screenshot",
+    description:
+      "Take a screenshot of the current screen as base64 PNG. Returns " +
+      "`{image: 'data:image/png;base64,...', width, height}`. Requires " +
+      "Android 11+ (API 30+); older devices return NOT_SUPPORTED. Use when " +
+      "a vision-capable LLM needs the pixels (e.g. 'summarize this UI'); " +
+      "for structured tasks pocket_pi_ui_screen is cheaper.",
+    parameters: { type: "object", properties: {} },
+    async execute() {
+      return tool(() => api("/ui/screenshot"));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_ui_poll_events",
+    label: "UI: Poll Events",
+    description:
+      "Long-poll for new accessibility events (notification_added, " +
+      "window_changed) since a cursor. Returns matching events plus a new " +
+      "`cursor` value to pass back on the next call. Blocks up to " +
+      "`timeoutMs` (max 60000) waiting for events. Use this for proactive " +
+      "agent behavior — e.g. 'wait for the next WhatsApp message and reply'.",
+    parameters: {
+      type: "object",
+      properties: {
+        since: { type: "number", description: "Last seen event seq; 0 for from-now-on" },
+        timeoutMs: { type: "number", description: "Max block ms (default 30000, max 60000)" },
+      },
+    },
+    async execute(_id, args) {
+      return tool(() => api("/ui/events/poll", args));
+    },
+  });
 }
+
