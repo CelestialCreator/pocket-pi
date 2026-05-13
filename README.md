@@ -108,6 +108,7 @@ The current build uses `applicationId = com.termux` so the upstream Termux boots
 | Other OAuth providers (Gemini CLI, ChatGPT Codex, GitHub Copilot, Antigravity) | sign-in completes but no models — Pi-side protocol bridges not bundled. Use the API-key path instead. |
 | Shell-session feature inside the dashboard | not yet — `node-pty` has no android-arm64 prebuild and is stubbed; chat/files/tasks work, terminal tab will fail |
 | **Mobile UI automation** (the agent reading other apps' screens, dispatching taps/swipes/text input/gestures, polling notifications + window-change events) | ✓ — new in v0.4.0. AccessibilityService vendored from [KarryViber/orb-eye](https://github.com/KarryViber/orb-eye) (MIT). One-time manual toggle in Settings → Accessibility → Pocket Pi (Android forbids runtime enablement). |
+| **Baked-in `pocket-pi-android-control` skill** so sub-Opus models actually reach for the new tools — fallback chain (deep link → intent → launch by package + UI drive → verify), six worked examples (Clock timer, WhatsApp, Dark theme, Contacts, notification reactor, read-screen), anti-patterns, deep-link catalog. Drops into `~/.pi/agent/skills/` at first launch. | ✓ — new in v0.4.0 |
 | Background location ("Allow all the time") | not yet — foreground only this release. Add the Settings escalation when a real use case appears. |
 | `applicationId` ≠ `com.termux` | not yet — requires custom bootstrap rebuild |
 | Old Android WebView builds (Chrome < ~120) | emulator system images ship stale WebView; real devices auto-update — confirmed working in Chrome 140+ |
@@ -130,6 +131,8 @@ MIT for Pocket Pi's own source. Third-party runtime components keep their own li
 ## Status
 
 **v0.4.0 — agent has the phone and the screen.** Daily-drivable. On top of the v0.3 phone surface (notifications, intents both directions, share-sheet, camera, mic, location, clipboard, deep-link inbox), v0.4 adds a full UI-automation surface via a vendored [KarryViber/orb-eye](https://github.com/KarryViber/orb-eye) AccessibilityService: the agent can read any app's element tree, find by text/desc/id, dispatch taps / swipes / long-presses / scrolls / multi-finger gestures, set text on focused fields, take screenshots (API 30+), fire global actions (back/home/recents/notifications), buffer system notifications, and long-poll a window-change + notification event channel for proactive behaviour. All gated by the same per-launch bearer token over localhost. No companion APK, no root, no shell setup; one manual Accessibility toggle in Settings on first run (Android requirement — Pocket Pi deep-links there from its onboarding pane).
+
+Bundled alongside the tools is a **baked-in `pocket-pi-android-control` skill** at `~/.pi/agent/skills/pocket-pi-android-control/SKILL.md`. Shipping the tools alone wasn't enough — emulator testing showed sub-Opus models (qwen-flash, etc.) would call `pocket_pi_intent_send` once, hit a wall, and give up. The skill anchors the fallback chain (deep link → generic intent → launch by package + UI drive → verify) with six worked examples and anti-patterns. With it loaded, the same models that bailed without it now complete full chains end-to-end.
 
 Roadmap from here, in rough priority order:
 
