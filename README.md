@@ -7,14 +7,12 @@ Pocket Pi is a thin Android wrapper around two upstream projects that do the rea
 - **[Pi coding agent](https://github.com/mariozechner/pi-coding-agent)** by [Mario Zechner](https://github.com/mariozechner) — the underlying agent engine. The canonical home is now [earendil-works/pi-coding-agent](https://github.com/earendil-works/pi-coding-agent).
 - **[pi-agent-dashboard](https://github.com/BlackBeltTechnology/pi-agent-dashboard)** by [BlackBelt Technology](https://github.com/BlackBeltTechnology) — the web chat UI rendered inside the APK's WebView (slash commands, session history, model switcher, provider settings, OAuth flows). [pi-anthropic-messages](https://github.com/BlackBeltTechnology/pi-anthropic-messages) (also BlackBelt) is the Anthropic protocol bridge that makes Claude Pro/Max OAuth tokens usable from Pi.
 
-What Pocket Pi adds is the packaging: a Termux runtime, postinstall script, an Android service that supervises `pi --mode rpc` + the dashboard's Node server, and a Compose WebView with a small recovery UI for when the bootstrap stalls.
-
-> POC, fast-tracked. We bundle Termux's Linux runtime inside an Android app so anyone can try a single-tap Pi install on a phone. Whether this approach is worth productizing (vs. building a proper native Android client) is the open question — that's what the POC is for.
+What Pocket Pi adds is the packaging: a Termux runtime, postinstall script, an Android service that supervises `pi --mode rpc` + the dashboard's Node server, a Compose WebView with a small recovery UI for when the bootstrap stalls, and an on-device HTTP bridge (`127.0.0.1:9998`, per-launch bearer token) that lets the agent reach Android capabilities — notifications, intents, share-sheet, camera, mic, location, clipboard, deep-link inbox — without any companion APK.
 
 ## Install
 
-1. Grab the latest APK — **v0.2.1** — from the [Releases page](https://github.com/CelestialCreator/pocket-pi/releases/latest), or directly: [pocket-pi-v0.2.1.apk](https://github.com/CelestialCreator/pocket-pi/releases/download/v0.2.1/pocket-pi-v0.2.1.apk) (40 MB, aarch64 only).
-2. Sideload — tap the APK on the phone (allow install from unknown sources for your browser/file manager), or `adb install pocket-pi-v0.2.1.apk`.
+1. Grab the latest APK — **v0.3.0** — from the [Releases page](https://github.com/CelestialCreator/pocket-pi/releases/latest), or directly: [pocket-pi-v0.3.0.apk](https://github.com/CelestialCreator/pocket-pi/releases/download/v0.3.0/pocket-pi-v0.3.0.apk) (40 MB, aarch64 only).
+2. Sideload — tap the APK on the phone (allow install from unknown sources for your browser/file manager), or `adb install pocket-pi-v0.3.0.apk`.
 3. Open the app. First launch runs the bootstrap (3–5 min on Wi-Fi: extracts Termux, installs Node + npm packages, registers Pi extensions).
 4. When the dashboard loads, tap its **⚙** (top-right of the page chrome) → **Providers** → add at least one provider. See [Providers — what works](#providers--what-works) below.
 5. Pick a model, chat away.
@@ -47,9 +45,9 @@ If you want to use Claude Pro/Max OAuth on Pocket Pi but prefer signing in on a 
 | Linux runtime | Termux bootstrap (Node 25, Python, git, ripgrep, openssl) — `bootstrap/` | [Termux](https://termux.dev/) |
 | Chat UI | [`@blackbelt-technology/pi-agent-dashboard`](https://www.npmjs.com/package/@blackbelt-technology/pi-agent-dashboard) — binds `:8000` (browser UI) + `:9999` (pi extension bridge); rendered in the app WebView. Slash commands, model switching, session history, provider settings, OAuth. | [BlackBelt Technology](https://github.com/BlackBeltTechnology/pi-agent-dashboard) |
 | Agent engine | [`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent), spawned as `pi --mode rpc` | [Mario Zechner](https://github.com/mariozechner/pi-coding-agent) / [earendil-works](https://github.com/earendil-works/pi-coding-agent) |
-| Pi extensions | [`pi-anthropic-messages`](https://github.com/BlackBeltTechnology/pi-anthropic-messages) (Claude Pro/Max OAuth + tool-call rendering) + `pi-web-access`, `pi-subagents`, `oh-pi`, `@aliou/pi-guardrails`, `pi-mcp-adapter`, `pk-pi-hermes-evolve` | various (see `bootstrap/npm-packages.txt`) |
+| Pi extensions | [`pi-anthropic-messages`](https://github.com/BlackBeltTechnology/pi-anthropic-messages) (Claude Pro/Max OAuth + tool-call rendering) + `pi-web-access`, `pi-subagents`, `oh-pi`, `@aliou/pi-guardrails`, `pi-mcp-adapter`, `pk-pi-hermes-evolve`, **`pi-termux-tools`** (Pocket Pi's phone-surface tools — notifications, intents, camera, mic, location, inbox) | various (see `bootstrap/npm-packages.txt`) + `extensions/pi-termux-tools/` |
 | Compose-side UI | Loading / recovery pane only (Pocket Pi splash, postinstall log tail, inline `Restart Pi` + `Re-run setup` buttons after a 15s stall). Everything else lives in the dashboard's own settings UI. | Pocket Pi |
-| Native bridges | `xdg-open` shim (postinstall) → Android `ACTION_VIEW` so the dashboard's OAuth flows open the device's default browser. Compose-side `PocketPi.notify/share/openExternal/toast` JS interface for the WebView. | Pocket Pi |
+| Native bridges | **Localhost HTTP API** on `127.0.0.1:9998` (bearer token at `$PREFIX/etc/pocket-pi/api-token`, mode 0600, rotated per service start) exposing notify / share / intent / clipboard / battery / location / camera/photo / mic/record / inbox to the agent. `xdg-open` shim (postinstall) → Android `ACTION_VIEW`. Compose-side `PocketPi.notify/share/openExternal/toast` JS interface for the WebView. Share-target + `pi://agent/…` deep-link intent-filters queue payloads into `$HOME/.pi/agent/inbox/`. | Pocket Pi |
 
 ## Repo layout
 
@@ -87,12 +85,12 @@ cd ../pi-skill-learner       && pnpm install && pnpm build
 
 # 3. APK
 cd ../../android && ./gradlew :app:assembleDebug
-# Output: android/app/build/outputs/apk/debug/app-debug.apk (~67 MB)
+# Output: android/app/build/outputs/apk/debug/app-debug.apk (~40 MB)
 ```
 
 The current build uses `applicationId = com.termux` so the upstream Termux bootstrap binaries (which bake in the path `/data/data/com.termux/files/usr`) work without recompiling. To ship under a real app id, run `bootstrap/rebuild-with-prefix.sh` (Docker, 4–12 h on Apple Silicon) to produce a bootstrap pinned to a custom prefix, then flip `applicationId` in `android/app/build.gradle.kts`.
 
-## What works / what doesn't (v0.2.1)
+## What works / what doesn't (v0.3.0)
 
 | | Status |
 |---|---|
@@ -100,9 +98,17 @@ The current build uses `applicationId = com.termux` so the upstream Termux boots
 | pi-agent-dashboard as the WebView UI (slash commands, model switcher, session history all native) | ✓ |
 | API-key chat for OpenAI / Anthropic API / Google Gemini (AI Studio) / Groq / Mistral / xAI / NVIDIA NIM / OpenRouter (tool use, cost tracking) | ✓ |
 | Claude Pro/Max **OAuth** Sign-In → device default browser → on-device callback | ✓ |
+| **Phone-surface tools for the agent** (notifications, share sheet, generic Android intents, dial, settings deep-links, clipboard, battery) | ✓ — new in v0.3.0 |
+| **Location** (fused gps/network, foreground only) | ✓ — new in v0.3.0 |
+| **Camera** (one-shot still capture, front/back) | ✓ — new in v0.3.0 |
+| **Microphone** (record N seconds to AAC/.m4a) | ✓ — new in v0.3.0 |
+| **Incoming intents** — "Share to Pocket Pi" target, `pi://agent/…` deep links, queued for the agent | ✓ — new in v0.3.0 |
+| **`pocket-pi-api` shell shim** — `pocket-pi-api notify '{…}'`, `pocket-pi-api camera/photo '{…}'` etc. from any Termux session | ✓ — new in v0.3.0 |
 | Recovery UI when the dashboard doesn't bind within 15s (inline Restart Pi / Re-run setup buttons) | ✓ |
 | Other OAuth providers (Gemini CLI, ChatGPT Codex, GitHub Copilot, Antigravity) | sign-in completes but no models — Pi-side protocol bridges not bundled. Use the API-key path instead. |
 | Shell-session feature inside the dashboard | not yet — `node-pty` has no android-arm64 prebuild and is stubbed; chat/files/tasks work, terminal tab will fail |
+| Mobile UI automation (the agent driving other apps) | not yet — deferred to v0.4; needs an Accessibility Service (the user has to enable it manually in Settings, no runtime dialog exists). Plan is to vendor [droidrun/droidrun-portal](https://github.com/droidrun/droidrun-portal). |
+| Background location ("Allow all the time") | not yet — foreground only this release. Add the Settings escalation when a real use case appears. |
 | `applicationId` ≠ `com.termux` | not yet — requires custom bootstrap rebuild |
 | Old Android WebView builds (Chrome < ~120) | emulator system images ship stale WebView; real devices auto-update — confirmed working in Chrome 140+ |
 
@@ -122,4 +128,12 @@ MIT for Pocket Pi's own source. Third-party runtime components keep their own li
 
 ## Status
 
-v0.2.1 — POC, shippable. The Termux-fork-inside-an-APK approach works: pi-agent-dashboard is the chat UI, single-tap APK install handles the rest. Whether to invest in productizing it (custom prefix bootstrap, real applicationId, signed release builds, Play Store, etc.) or rewrite this as a proper native Android client that talks to Pi over the network is the question this POC is meant to inform.
+**v0.3.0 — agent has the phone.** Daily-drivable. The Termux-runtime-inside-an-APK approach lands cleanly: single-tap install, dashboard binds the WebView, and the agent now has a real Android surface to act on — notifications, intents (both directions), share-sheet, camera, mic, location, clipboard, deep-link inbox — all gated by a per-launch bearer token over localhost. No companion APK, no root, no shell setup.
+
+Roadmap from here, in rough priority order:
+
+- **v0.4 — UI automation.** Vendor [droidrun/droidrun-portal](https://github.com/droidrun/droidrun-portal)'s Kotlin AccessibilityService into the APK so the agent can read screens + dispatch taps/swipes/gestures against other apps. The one irreducible cost: Android forces the user to enable Accessibility in Settings manually (no runtime dialog exists for this permission).
+- **Background location escalation** when a real use case lands ("Allow all the time" → `ACCESS_BACKGROUND_LOCATION`).
+- **More OAuth providers** end-to-end (Gemini CLI, ChatGPT Codex, GitHub Copilot, Antigravity) — each requires a small Pi-side protocol bridge analogous to `pi-anthropic-messages`.
+- **Custom-prefix bootstrap** so `applicationId` can move off `com.termux`. Currently a 4–12 h Docker build on Apple Silicon; once it's clean, the path to a real signed release on Play Store is short.
+- **Working shell-session tab** in the dashboard once a working `node-pty` android-arm64 prebuild exists (currently stubbed).

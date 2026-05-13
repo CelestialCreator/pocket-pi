@@ -142,6 +142,19 @@ if [ -d "$ANTHROPIC_MSG_DIR" ]; then
     echo "  WARN: pi-anthropic-messages failed to register"
 fi
 
+# Register Pocket-Pi-bundled extensions. These live under $PREFIX/lib/pocket-pi/
+# instead of node_modules because they're shipped with the APK rather than
+# pulled from npm. pi install <abs-path> works the same way.
+if [ -d "$PREFIX/lib/pocket-pi" ]; then
+  for ext_dir in "$PREFIX/lib/pocket-pi"/*; do
+    [ -d "$ext_dir" ] || continue
+    name="$(basename "$ext_dir")"
+    echo "  -> pi install $ext_dir  ($name)"
+    pi install "$ext_dir" 2>&1 | tail -2 || \
+      echo "  WARN: $name failed to register"
+  done
+fi
+
 # The dashboard's source-matching (packages/shared/src/source-matching.ts)
 # compares each settings.json#packages[] entry against the recommended-
 # extensions manifest. For pi-anthropic-messages the manifest source is the
@@ -232,16 +245,33 @@ PY
 # entirely. Idempotent: this is the source of truth, we always overwrite.
 OVERRIDES="$HOME/.pi/dashboard/tool-overrides.json"
 mkdir -p "$(dirname "$OVERRIDES")"
+# The dashboard's tool resolver probes a hardcoded set of well-known
+# binaries on the system PATH (using a Linux/Mac default search path that
+# does NOT include $PREFIX/bin), so anything bundled in Termux's runtime
+# shows as "not found" in Settings → Tools even when it's right there in
+# $PREFIX/bin. Adding explicit overrides flips those rows from ✗ to ✓ and
+# lets dashboard features that lean on these binaries (git status display,
+# process inspection in shell sessions, etc.) actually work.
+#
+# pi + pi-coding-agent serve a different purpose here: their overrides
+# short-circuit the dashboard's auto-install loop, which would otherwise
+# re-pull pi-coding-agent + node-pty and crash on the missing arm64
+# prebuild — see the comment below.
 cat > "$OVERRIDES" <<JSON
 {
   "version": 1,
   "overrides": {
     "pi": { "path": "$PREFIX/bin/pi" },
-    "pi-coding-agent": { "path": "$PREFIX/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.js" }
+    "pi-coding-agent": { "path": "$PREFIX/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.js" },
+    "node": { "path": "$PREFIX/bin/node" },
+    "npm": { "path": "$PREFIX/bin/npm" },
+    "git": { "path": "$PREFIX/bin/git" },
+    "ps": { "path": "$PREFIX/bin/ps" },
+    "pgrep": { "path": "$PREFIX/bin/pgrep" }
   }
 }
 JSON
-echo "==> wrote $OVERRIDES (pi resolved via override → no managed re-install)"
+echo "==> wrote $OVERRIDES (pi + node/npm/git/ps/pgrep resolved via override)"
 
 # --- 3d. xdg-open shim → Android system browser via ACTION_VIEW ------------
 # pi-agent-dashboard's OAuth flow (Anthropic Claude Pro/Max, ChatGPT Plus,
@@ -272,6 +302,46 @@ exec am start -a android.intent.action.VIEW -d "$url" >/dev/null 2>&1
 XDG
 chmod +x "$XDG_OPEN"
 echo "==> wrote $XDG_OPEN (system-browser shim for OAuth flows)"
+
+# --- 3e. pocket-pi-api shim → localhost HTTP bridge to the Android app ------
+# Lets shell commands (and the pi-termux-tools extension) reach the in-APK
+# HTTP server that exposes Android capabilities (notify, share, intent,
+# location, camera, mic, inbox, clipboard, battery). The Android service
+# binds 127.0.0.1:9998 and writes a per-launch bearer token to
+# $PREFIX/etc/pocket-pi/api-token (mode 0600, same UID as Termux).
+#
+# Usage:
+#   pocket-pi-api health
+#   pocket-pi-api notify '{"title":"hi","content":"there"}'
+#   pocket-pi-api camera/photo '{"camera":"back"}'
+#   pocket-pi-api intent '{"action":"android.intent.action.VIEW","data":"https://pi.dev"}'
+mkdir -p "$ETC"
+POCKET_PI_API="$PREFIX/bin/pocket-pi-api"
+rm -f "$POCKET_PI_API"
+cat > "$POCKET_PI_API" <<'API'
+#!/data/data/com.termux/files/usr/bin/bash
+# pocket-pi-api — curl wrapper for Pocket Pi's localhost HTTP bridge.
+set -eu
+path="${1:-health}"
+body="${2:-}"
+token_file="$PREFIX/etc/pocket-pi/api-token"
+if [ ! -f "$token_file" ]; then
+  echo "pocket-pi-api: no token file at $token_file — is the app running?" >&2
+  exit 2
+fi
+token="$(cat "$token_file")"
+auth="Authorization: Bearer $token"
+if [ -n "$body" ]; then
+  exec curl -fsS --max-time 60 -H "$auth" \
+    -H "Content-Type: application/json" \
+    -X POST -d "$body" "http://127.0.0.1:9998/$path"
+else
+  exec curl -fsS --max-time 60 -H "$auth" \
+    -X POST -d '{}' "http://127.0.0.1:9998/$path"
+fi
+API
+chmod +x "$POCKET_PI_API"
+echo "==> wrote $POCKET_PI_API (curl shim for the localhost API)"
 
 # --- 4. Apply hermes-evolve patch (re-include claude-bridge under -p) -------
 echo "==> Applying hermes-evolve claude-bridge re-include patch"

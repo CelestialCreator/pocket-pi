@@ -4,3 +4,4 @@ git
 ripgrep
 termux-api
 openssl
+curl

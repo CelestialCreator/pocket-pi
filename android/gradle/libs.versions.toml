@@ -10,6 +10,7 @@ kotlinxCoroutines = "1.8.1"
 material3 = "1.3.0"
 datastore = "1.1.1"
 work = "2.9.1"
+camerax = "1.3.4"
 
 [libraries]
 androidx-core-ktx          = { group = "androidx.core",        name = "core-ktx",                   version.ref = "coreKtx" }
@@ -24,6 +25,9 @@ androidx-datastore         = { group = "androidx.datastore",   name = "datastore
 androidx-work              = { group = "androidx.work",        name = "work-runtime-ktx",           version.ref = "work" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+androidx-camera-core       = { group = "androidx.camera",      name = "camera-core",                version.ref = "camerax" }
+androidx-camera-camera2    = { group = "androidx.camera",      name = "camera-camera2",             version.ref = "camerax" }
+androidx-camera-lifecycle  = { group = "androidx.camera",      name = "camera-lifecycle",           version.ref = "camerax" }
 
 [plugins]
 android-application   = { id = "com.android.application",                version.ref = "agp" }

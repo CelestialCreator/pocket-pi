@@ -1,273 +1,449 @@
-// pi-termux-tools — Pi extension exposing Termux:API as agent tools.
+// pi-termux-tools — Pi extension exposing Pocket Pi's phone surface as agent
+// tools. Routes every call through the in-APK localhost HTTP bridge at
+// 127.0.0.1:9998, gated by the per-launch bearer token at
+// $PREFIX/etc/pocket-pi/api-token. No companion APK is required — the
+// capabilities live inside Pocket Pi itself.
 //
-// Each tool is a thin shell-out to a `termux-*` binary that ships with the
-// Termux:API package. Pocket Pi's bootstrap pre-installs `termux-api`, so
-// every tool here is available out-of-the-box on the device.
+// Tool naming retains the `termux_*` prefix for backwards compat with sessions
+// that already learned the old names; new capabilities use the `pocket_pi_*`
+// prefix to signal they're Pocket-Pi-specific (no analogue in upstream Termux).
 //
-// Pi's extension API surface is intentionally lean. The contract this file
-// implements is:
+// Pi's extension contract (matching oh-pi's bg-process.ts as canonical):
 //
-//   export default function register(ctx: PiExtensionContext): void
-//
-// where `ctx.registerTool(spec, handler)` adds a tool callable by the model.
-// The shape below mirrors how pi-claude-bridge and pi-mcp-adapter declare
-// their tools — see those packages for the canonical reference.
+//   export default function register(api: ExtensionAPI): void
+//   api.registerTool({
+//     name, label, description, parameters,
+//     async execute(toolCallId, params, signal) {
+//       return { content: [{ type: "text", text }], isError?: boolean };
+//     },
+//   });
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { mkdir, writeFile } from "node:fs/promises";
+import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const exec = promisify(execFile);
-
-// Minimal structural type for Pi's extension context. We avoid importing from
-// @mariozechner/pi-coding-agent at build time so this package can be published
-// without a hard dep on a specific Pi version.
-type ToolSpec = {
-  name: string;
-  description: string;
-  parameters: { type: "object"; properties: Record<string, unknown>; required?: string[] };
+// Minimal structural type for Pi's extension API. Captures only what we use.
+type ToolResult = {
+  content: Array<{ type: "text"; text: string }>;
+  details?: Record<string, unknown>;
+  isError?: boolean;
 };
-type ToolResult = { content: string } | { error: string };
-type ToolHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
-export interface PiExtensionContext {
-  registerTool(spec: ToolSpec, handler: ToolHandler): void;
+type ToolDefinition = {
+  name: string;
+  label?: string;
+  description: string;
+  parameters: {
+    type: "object";
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+  execute(
+    toolCallId: string,
+    params: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<ToolResult>;
+};
+export interface ExtensionAPI {
+  registerTool(def: ToolDefinition): void;
   log?: (level: "info" | "warn" | "error", msg: string) => void;
 }
 
-async function sh(cmd: string, args: string[]): Promise<string> {
-  const { stdout } = await exec(cmd, args, { maxBuffer: 8 * 1024 * 1024 });
-  return stdout;
+const API_HOST = "http://127.0.0.1:9998";
+const TOKEN_PATH = `${process.env.PREFIX ?? "/data/data/com.termux/files/usr"}/etc/pocket-pi/api-token`;
+
+async function readToken(): Promise<string> {
+  const token = (await readFile(TOKEN_PATH, "utf8")).trim();
+  if (!token) throw new Error(`empty api-token at ${TOKEN_PATH} — is Pocket Pi running?`);
+  return token;
 }
 
-async function safe(handler: () => Promise<string>): Promise<ToolResult> {
+async function api(path: string, body?: unknown): Promise<unknown> {
+  const token = await readToken();
+  const url = `${API_HOST}${path.startsWith("/") ? path : `/${path}`}`;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: body ? JSON.stringify(body) : "{}",
+  });
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw new Error(`${r.status} ${r.statusText}: ${text || "(no body)"}`);
+  }
+  return r.json();
+}
+
+/** Wrap a body-producing async fn into Pi's tool-result shape. */
+async function tool(handler: () => Promise<unknown>): Promise<ToolResult> {
   try {
-    const content = await handler();
-    return { content: content.trim() || "ok" };
+    const out = await handler();
+    const text = typeof out === "string" ? out : JSON.stringify(out);
+    return { content: [{ type: "text", text: text || "ok" }] };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { error: msg };
+    return { content: [{ type: "text", text: msg }], isError: true };
   }
 }
 
-export default function register(ctx: PiExtensionContext): void {
+export default function register(pi: ExtensionAPI): void {
   // ---- Notifications --------------------------------------------------------
-  ctx.registerTool(
-    {
-      name: "termux_notify",
-      description:
-        "Show an Android notification. Use to surface long-task results, " +
-        "skill proposals, or any signal the user should see while the app " +
-        "is backgrounded. The notification is non-interactive.",
-      parameters: {
-        type: "object",
-        properties: {
-          title: { type: "string", description: "Bold notification title" },
-          content: { type: "string", description: "Body text (1–3 short lines)" },
-          priority: {
-            type: "string",
-            enum: ["min", "low", "default", "high", "max"],
-            description: "Defaults to 'default'",
-          },
+  pi.registerTool({
+    name: "termux_notify",
+    label: "Notify",
+    description:
+      "Show an Android notification. Use to surface long-task results, " +
+      "skill proposals, or any signal the user should see while the app " +
+      "is backgrounded. The notification is non-interactive.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Bold notification title" },
+        content: { type: "string", description: "Body text (1–3 short lines)" },
+        priority: {
+          type: "string",
+          enum: ["min", "low", "default", "high", "max"],
+          description: "Defaults to 'default'",
         },
-        required: ["title", "content"],
       },
+      required: ["title", "content"],
     },
-    (args) =>
-      safe(async () => {
-        const title = String(args.title ?? "");
-        const content = String(args.content ?? "");
-        const priority = String(args.priority ?? "default");
-        await sh("termux-notification", ["-t", title, "-c", content, "--priority", priority]);
-        return `notified: ${title}`;
-      }),
-  );
+    async execute(_id, args) {
+      return tool(() =>
+        api("/notify", {
+          title: String(args.title ?? ""),
+          content: String(args.content ?? ""),
+          priority: args.priority ? String(args.priority) : "default",
+        }),
+      );
+    },
+  });
 
   // ---- TTS ------------------------------------------------------------------
-  ctx.registerTool(
-    {
-      name: "termux_tts_speak",
-      description:
-        "Speak text aloud via Android TTS. Use for hands-busy / eyes-busy " +
-        "moments (driving, cooking) or when the user explicitly asked for " +
-        "audio output. Keep utterances under ~30 seconds of speech.",
-      parameters: {
-        type: "object",
-        properties: { text: { type: "string" } },
-        required: ["text"],
-      },
+  pi.registerTool({
+    name: "termux_tts_speak",
+    label: "TTS",
+    description:
+      "Speak text aloud via Android TTS. Use for hands-busy / eyes-busy " +
+      "moments (driving, cooking) or when the user explicitly asked for " +
+      "audio output. Keep utterances under ~30 seconds of speech.",
+    parameters: {
+      type: "object",
+      properties: { text: { type: "string" } },
+      required: ["text"],
     },
-    (args) =>
-      safe(async () => {
-        await sh("termux-tts-speak", [String(args.text ?? "")]);
-        return "spoken";
-      }),
-  );
+    async execute(_id, args) {
+      return tool(() => api("/tts", { text: String(args.text ?? "") }));
+    },
+  });
 
   // ---- Camera ---------------------------------------------------------------
-  ctx.registerTool(
-    {
-      name: "termux_camera_photo",
-      description:
-        "Capture a photo from a device camera and save it to the agent's " +
-        "captures directory. Returns the absolute path. Use to OCR a " +
-        "receipt, parse a whiteboard, identify an object, etc.",
-      parameters: {
-        type: "object",
-        properties: {
-          camera: {
-            type: "string",
-            enum: ["back", "front"],
-            description: "Defaults to back",
-          },
-          name: {
-            type: "string",
-            description: "Filename (without extension); defaults to ISO timestamp",
-          },
+  pi.registerTool({
+    name: "termux_camera_photo",
+    label: "Camera Photo",
+    description:
+      "Capture a photo from a device camera and save it to the agent's " +
+      "captures directory. Returns the absolute path. Use to OCR a " +
+      "receipt, parse a whiteboard, identify an object, etc.",
+    parameters: {
+      type: "object",
+      properties: {
+        camera: {
+          type: "string",
+          enum: ["back", "front"],
+          description: "Defaults to back",
+        },
+        name: {
+          type: "string",
+          description: "Filename (without extension); defaults to ISO timestamp",
         },
       },
     },
-    (args) =>
-      safe(async () => {
-        const cam = args.camera === "front" ? "1" : "0";
-        const dir = join(homedir(), ".pi", "agent", "captures");
-        await mkdir(dir, { recursive: true });
-        const fname = `${(args.name as string) ?? new Date().toISOString().replace(/[:.]/g, "-")}.jpg`;
-        const out = join(dir, fname);
-        await sh("termux-camera-photo", ["-c", cam, out]);
-        return out;
-      }),
-  );
+    async execute(_id, args) {
+      return tool(() =>
+        api("/camera/photo", {
+          camera: args.camera === "front" ? "front" : "back",
+          name: args.name ? String(args.name) : undefined,
+        }),
+      );
+    },
+  });
 
   // ---- Share ----------------------------------------------------------------
-  ctx.registerTool(
-    {
-      name: "termux_share",
-      description:
-        "Open Android's share sheet for a file. Use when the user asks to " +
-        "share a file produced by the agent (a generated note, screenshot, " +
-        "report) with another app.",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "Absolute path to the file" },
-          title: { type: "string", description: "Share-sheet title" },
-        },
-        required: ["path"],
+  pi.registerTool({
+    name: "termux_share",
+    label: "Share",
+    description:
+      "Open Android's share sheet for a file or text. Use when the user " +
+      "asks to share a file produced by the agent (a generated note, " +
+      "screenshot, report) with another app, or to share plain text.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Absolute path to a file" },
+        text: { type: "string", description: "Plain text to share" },
+        title: { type: "string", description: "Share-sheet title" },
+        type: { type: "string", description: "MIME type (defaults to text/plain or */*)" },
       },
     },
-    (args) =>
-      safe(async () => {
-        const path = String(args.path);
-        const flags = ["-a", "send"];
-        if (args.title) flags.push("-t", String(args.title));
-        flags.push(path);
-        await sh("termux-share", flags);
-        return `shared: ${path}`;
-      }),
-  );
+    async execute(_id, args) {
+      return tool(() => {
+        const body: Record<string, unknown> = {};
+        if (args.path) body.path = String(args.path);
+        if (args.text) body.text = String(args.text);
+        if (args.title) body.title = String(args.title);
+        if (args.type) body.type = String(args.type);
+        if (!body.path && !body.text) throw new Error("path or text required");
+        return api("/share", body);
+      });
+    },
+  });
 
   // ---- Clipboard ------------------------------------------------------------
-  ctx.registerTool(
-    {
-      name: "termux_clipboard_get",
-      description: "Read the Android clipboard (text only).",
-      parameters: { type: "object", properties: {} },
+  pi.registerTool({
+    name: "termux_clipboard_get",
+    label: "Clipboard Get",
+    description: "Read the Android clipboard (text only).",
+    parameters: { type: "object", properties: {} },
+    async execute() {
+      return tool(() => api("/clipboard/get"));
     },
-    () => safe(() => sh("termux-clipboard-get", [])),
-  );
+  });
 
-  ctx.registerTool(
-    {
-      name: "termux_clipboard_set",
-      description: "Write text to the Android clipboard.",
-      parameters: {
-        type: "object",
-        properties: { text: { type: "string" } },
-        required: ["text"],
-      },
+  pi.registerTool({
+    name: "termux_clipboard_set",
+    label: "Clipboard Set",
+    description: "Write text to the Android clipboard.",
+    parameters: {
+      type: "object",
+      properties: { text: { type: "string" } },
+      required: ["text"],
     },
-    (args) =>
-      safe(async () => {
-        await sh("termux-clipboard-set", [String(args.text ?? "")]);
-        return "copied";
-      }),
-  );
+    async execute(_id, args) {
+      return tool(() => api("/clipboard/set", { text: String(args.text ?? "") }));
+    },
+  });
 
-  // ---- Battery / Wifi / Toast ----------------------------------------------
-  ctx.registerTool(
-    {
-      name: "termux_battery_status",
-      description: "Battery percent, charging state, temperature, health.",
-      parameters: { type: "object", properties: {} },
+  // ---- Battery / Toast ------------------------------------------------------
+  pi.registerTool({
+    name: "termux_battery_status",
+    label: "Battery",
+    description: "Battery percent, charging state, temperature, health.",
+    parameters: { type: "object", properties: {} },
+    async execute() {
+      return tool(() => api("/battery"));
     },
-    () => safe(() => sh("termux-battery-status", [])),
-  );
+  });
 
-  ctx.registerTool(
-    {
-      name: "termux_toast",
-      description: "Show a brief Android toast (auto-dismissed).",
-      parameters: {
-        type: "object",
-        properties: { text: { type: "string" } },
-        required: ["text"],
-      },
+  pi.registerTool({
+    name: "termux_toast",
+    label: "Toast",
+    description: "Show a brief Android toast (auto-dismissed).",
+    parameters: {
+      type: "object",
+      properties: { text: { type: "string" } },
+      required: ["text"],
     },
-    (args) =>
-      safe(async () => {
-        await sh("termux-toast", [String(args.text ?? "")]);
-        return "toasted";
-      }),
-  );
+    async execute(_id, args) {
+      return tool(() => api("/toast", { text: String(args.text ?? "") }));
+    },
+  });
 
   // ---- Location -------------------------------------------------------------
-  ctx.registerTool(
-    {
-      name: "termux_location",
-      description:
-        "Get device location. Slow (may take several seconds). Returns JSON " +
-        "with latitude, longitude, accuracy, provider, and ISO timestamp.",
-      parameters: {
-        type: "object",
-        properties: {
-          provider: {
-            type: "string",
-            enum: ["gps", "network", "passive"],
-            description: "Defaults to gps",
-          },
+  pi.registerTool({
+    name: "termux_location",
+    label: "Location",
+    description:
+      "Get device location. Slow (may take several seconds). Returns JSON " +
+      "with latitude, longitude, accuracy, provider, and timestamp.",
+    parameters: {
+      type: "object",
+      properties: {
+        provider: {
+          type: "string",
+          enum: ["gps", "network", "passive", "fused"],
+          description: "Defaults to fused (gps + network)",
+        },
+        timeoutSeconds: {
+          type: "number",
+          description: "Defaults to 15. Max effective ~60.",
         },
       },
     },
-    (args) =>
-      safe(async () =>
-        sh("termux-location", ["-p", String(args.provider ?? "gps")]),
-      ),
-  );
+    async execute(_id, args) {
+      return tool(() =>
+        api("/location", {
+          provider: args.provider ? String(args.provider) : "fused",
+          timeoutSeconds: args.timeoutSeconds ? Number(args.timeoutSeconds) : 15,
+        }),
+      );
+    },
+  });
 
   // ---- File save (helper) ---------------------------------------------------
-  ctx.registerTool(
-    {
-      name: "termux_save_to_downloads",
-      description:
-        "Save text content into the user's Downloads folder so they can " +
-        "find it from the Files app. Returns the absolute path.",
-      parameters: {
-        type: "object",
-        properties: {
-          name: { type: "string", description: "Filename incl. extension" },
-          content: { type: "string" },
-        },
-        required: ["name", "content"],
+  pi.registerTool({
+    name: "termux_save_to_downloads",
+    label: "Save to Downloads",
+    description:
+      "Save text content into the agent's downloads folder " +
+      "(~/.pi/agent/downloads/). Returns the absolute path. Use " +
+      "pocket_pi_intent_send with ACTION_VIEW + a file:// data URI if you " +
+      "want to open it in the user's file manager.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Filename incl. extension" },
+        content: { type: "string" },
+      },
+      required: ["name", "content"],
+    },
+    async execute(_id, args) {
+      return tool(async () => {
+        const dir = join(homedir(), ".pi", "agent", "downloads");
+        await mkdir(dir, { recursive: true });
+        const out = join(dir, String(args.name));
+        await writeFile(out, String(args.content), "utf8");
+        return { path: out };
+      });
+    },
+  });
+
+  // ---- Generic Android intent ----------------------------------------------
+  pi.registerTool({
+    name: "pocket_pi_intent_send",
+    label: "Intent",
+    description:
+      "Send a generic Android intent (startActivity). Use this to invoke " +
+      "any Android action by its constant — open a settings screen, dial " +
+      "a number, send an SMS draft, view a file, etc. The intent is " +
+      "started with FLAG_ACTIVITY_NEW_TASK from a Service context.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "Android action constant, e.g. 'android.intent.action.VIEW'" },
+        data: { type: "string", description: "URI for the intent (http://…, tel:…, file://…, geo:…)" },
+        type: { type: "string", description: "MIME type" },
+        package: { type: "string", description: "Restrict to this package" },
+        componentPackage: { type: "string" },
+        componentClass: { type: "string" },
+        categories: { type: "array", items: { type: "string" } },
+        extras: { type: "object", description: "String/number/bool key-value pairs to attach" },
+        flags: { type: "array", items: { type: "number" }, description: "Extra Intent flags (ORed in)" },
+      },
+      required: ["action"],
+    },
+    async execute(_id, args) {
+      return tool(() => api("/intent", args));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_intent_open_url",
+    label: "Open URL",
+    description:
+      "Open a URL in the device's default browser. Equivalent to " +
+      "pocket_pi_intent_send with ACTION_VIEW + the URL.",
+    parameters: {
+      type: "object",
+      properties: { url: { type: "string" } },
+      required: ["url"],
+    },
+    async execute(_id, args) {
+      return tool(() => api("/open-url", { url: String(args.url ?? "") }));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_intent_dial",
+    label: "Dial",
+    description:
+      "Pre-fill the dialer with a phone number. Doesn't auto-call — the " +
+      "user still has to tap dial. Use for hands-free 'call this number' " +
+      "flows.",
+    parameters: {
+      type: "object",
+      properties: { number: { type: "string", description: "E.164 or local format" } },
+      required: ["number"],
+    },
+    async execute(_id, args) {
+      return tool(() =>
+        api("/intent", {
+          action: "android.intent.action.DIAL",
+          data: `tel:${String(args.number ?? "")}`,
+        }),
+      );
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_intent_settings",
+    label: "Settings",
+    description:
+      "Open a specific Android Settings screen. The screen is identified " +
+      "by its action constant (e.g. 'android.settings.WIFI_SETTINGS', " +
+      "'android.settings.LOCATION_SOURCE_SETTINGS', " +
+      "'android.settings.APPLICATION_DETAILS_SETTINGS').",
+    parameters: {
+      type: "object",
+      properties: { action: { type: "string", description: "Settings.ACTION_* constant" } },
+      required: ["action"],
+    },
+    async execute(_id, args) {
+      return tool(() => api("/intent", { action: String(args.action ?? "") }));
+    },
+  });
+
+  // ---- Mic ------------------------------------------------------------------
+  pi.registerTool({
+    name: "pocket_pi_mic_record",
+    label: "Mic Record",
+    description:
+      "Record audio from the device microphone for N seconds. Returns the " +
+      "path to a .m4a (AAC) file in ~/.pi/agent/captures/. Use for voice " +
+      "memos, dictation pipelines, environmental capture. The green " +
+      "microphone privacy dot is shown for the duration.",
+    parameters: {
+      type: "object",
+      properties: {
+        seconds: { type: "number", description: "1–300. Defaults to 5." },
+        name: { type: "string", description: "Filename without extension." },
       },
     },
-    (args) =>
-      safe(async () => {
-        const downloads = "/storage/emulated/0/Download";
-        const out = join(downloads, String(args.name));
-        await writeFile(out, String(args.content), "utf8");
-        return out;
-      }),
-  );
+    async execute(_id, args) {
+      return tool(() =>
+        api("/mic/record", {
+          seconds: args.seconds ? Number(args.seconds) : 5,
+          name: args.name ? String(args.name) : undefined,
+        }),
+      );
+    },
+  });
+
+  // ---- Inbox (incoming intents) --------------------------------------------
+  pi.registerTool({
+    name: "pocket_pi_inbox_list",
+    label: "Inbox List",
+    description:
+      "List queued incoming intents — anything the user shared to Pocket " +
+      "Pi or any `pi://agent/…` deep link they tapped. Does not drain the " +
+      "queue. Returns [{name, size}] sorted oldest-first.",
+    parameters: { type: "object", properties: {} },
+    async execute() {
+      return tool(() => api("/inbox/list"));
+    },
+  });
+
+  pi.registerTool({
+    name: "pocket_pi_inbox_pop",
+    label: "Inbox Pop",
+    description:
+      "Pop the oldest entry from the inbox and return its contents " +
+      "({action, data, type, extras, …}). The entry is removed from the " +
+      "queue. Returns {empty:true} if nothing was queued.",
+    parameters: { type: "object", properties: {} },
+    async execute() {
+      return tool(() => api("/inbox/pop"));
+    },
+  });
 }

@@ -6,10 +6,14 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
@@ -36,6 +40,31 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!--
+              Deep link: pi://agent/<path>?<query>. The agent doesn't need a
+              verified App Link (https + assetlinks.json) since pi:// is a
+              custom scheme owned by Pocket Pi. MainActivity.onNewIntent
+              routes incoming Intents into the inbox file the agent polls.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="pi" android:host="agent" />
+            </intent-filter>
+
+            <!--
+              Share target: "Share to Pocket Pi" from any app. Text + image
+              MIME types cover the common cases (selected text, screenshots,
+              photos). The payload (text or content URI) lands in the inbox.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
         </activity>
 
 
@@ -43,6 +72,26 @@
             android:name=".service.PocketPiService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!--
+          Transient foreground services for hardware capture. Each runs only
+          while a capture is in flight, so the system privacy dot (mic/camera)
+          and notification only show when the agent is actively using the
+          hardware. Service classes drive runtime permissions for their
+          respective sensors via PocketPiApiServer dispatching to them.
+        -->
+        <service
+            android:name=".service.LocationFgService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+        <service
+            android:name=".service.CameraFgService"
+            android:exported="false"
+            android:foregroundServiceType="camera" />
+        <service
+            android:name=".service.MicFgService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

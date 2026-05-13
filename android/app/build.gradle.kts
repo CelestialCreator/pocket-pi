@@ -26,8 +26,8 @@ android {
         // legacy semantics that allow exec from app-data, which Pi (and the
         // entire Termux runtime) relies on.
         targetSdk = 28
-        versionCode = 3
-        versionName = "0.2.1"
+        versionCode = 4
+        versionName = "0.3.0"
 
         ndk { abiFilters += listOf("arm64-v8a") }
     }
@@ -75,4 +75,7 @@ dependencies {
     implementation(libs.androidx.work)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
 }

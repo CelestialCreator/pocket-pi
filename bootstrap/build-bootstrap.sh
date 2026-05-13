@@ -59,6 +59,25 @@ cp "$ROOT/config/claude-bridge.json" "$SKEL/.pi/agent/claude-bridge.json"
 cp "$ROOT/config/models.json"        "$SKEL/.pi/agent/models.json"
 cp -R "$ROOT/skills/."               "$SKEL/.pi/agent/skills/"
 
+# 2a. Bundled Pi extensions — built TypeScript dropped under
+# $PREFIX/lib/pocket-pi/<name>/. postinstall.sh runs `pi install` against
+# each path so they're registered for the agent at first launch. We ship
+# them from this monorepo because they're Pocket-Pi-specific (no upstream
+# npm registry counterpart).
+PI_EXT_DST="$WORK/prefix/lib/pocket-pi"
+mkdir -p "$PI_EXT_DST"
+for ext in pi-termux-tools; do
+  src="$ROOT/extensions/$ext"
+  if [ ! -d "$src/dist" ]; then
+    echo "==> Building extension: $ext"
+    ( cd "$src" && pnpm install --silent && pnpm build )
+  fi
+  mkdir -p "$PI_EXT_DST/$ext"
+  cp -R "$src/dist"          "$PI_EXT_DST/$ext/dist"
+  cp    "$src/package.json"  "$PI_EXT_DST/$ext/package.json"
+  [ -f "$src/README.md" ] && cp "$src/README.md" "$PI_EXT_DST/$ext/README.md" || true
+done
+
 # 3. Repack
 OUT="$DIST/bootstrap-${ARCH}.zip"
 rm -f "$OUT"

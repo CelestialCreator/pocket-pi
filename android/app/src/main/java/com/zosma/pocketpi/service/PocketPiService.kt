@@ -9,6 +9,7 @@ import androidx.core.app.NotificationCompat
 import com.zosma.pocketpi.MainActivity
 import com.zosma.pocketpi.PocketPiApp
 import com.zosma.pocketpi.R
+import com.zosma.pocketpi.api.PocketPiApiServer
 import com.zosma.pocketpi.pi.PiBridge
 
 /**
@@ -26,12 +27,15 @@ class PocketPiService : Service() {
         val notif = buildNotification("Starting Pi…")
         startForeground(NOTIF_ID, notif)
         bridge = PiBridge(this).also { it.start() }
+        apiServer = PocketPiApiServer(applicationContext).also { it.start() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        apiServer?.stop()
+        apiServer = null
         bridge?.stop()
         bridge = null
         super.onDestroy()
@@ -54,6 +58,8 @@ class PocketPiService : Service() {
     companion object {
         const val NOTIF_ID = 1001
         @JvmStatic var bridge: PiBridge? = null
+            private set
+        @JvmStatic var apiServer: PocketPiApiServer? = null
             private set
     }
 }
