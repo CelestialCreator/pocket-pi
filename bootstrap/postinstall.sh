@@ -31,19 +31,63 @@ fi
 # — pick a different mirror with `termux-change-repo --auto` and retry.
 if command -v pkg >/dev/null 2>&1; then
   pkg update -y || true
-  xargs -a "$ETC/packages.txt" pkg install -y 2>/dev/null || true
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "==> npm missing after first apt; rotating mirror and retrying"
-    pkg install -y nodejs || \
+  # First pass: install everything from packages.txt. Stderr is captured (not
+  # discarded) so a mirror flake leaves breadcrumbs in postinstall.log.
+  xargs -a "$ETC/packages.txt" pkg install -y || true
+  # Second pass: re-run for anything that didn't land. apt's "package X is
+  # already the newest version" is fast (~100ms each) so this is cheap when
+  # everything succeeded the first time. The mirror often recovers between
+  # passes, picking up packages that 503'd or timed out earlier.
+  missing=""
+  while IFS= read -r p; do
+    p="${p%%#*}"; p="${p// /}"
+    [ -z "$p" ] && continue
+    case "$p" in
+      # termux-api is a CLI shim that only works with the Termux:API companion
+      # APK installed. We deliberately don't bundle it (Pocket Pi exposes the
+      # same surface via its own localhost HTTP bridge), but we still install
+      # the apt package because some upstream extensions probe `which termux-*`.
+      # If apt fails to install it that's fine — no companion APK means the
+      # CLI was a no-op anyway. Skip the missing check for it.
+      termux-api) continue ;;
+    esac
+    # `command -v` works for binaries on PATH; some packages install libs
+    # only (e.g. openssl), so fall back to checking dpkg's status.
+    if ! command -v "$p" >/dev/null 2>&1 && \
+       ! dpkg -s "$p" >/dev/null 2>&1; then
+      missing="$missing $p"
+    fi
+  done < "$ETC/packages.txt"
+  if [ -n "$missing" ]; then
+    echo "==> First apt pass missed:$missing — rotating mirror and retrying"
+    pkg install -y $missing || \
       apt-get -o Acquire::AllowInsecureRepositories=true \
               -o Acquire::AllowDowngradeToInsecureRepositories=true \
-              install -y --fix-broken nodejs || true
+              install -y --fix-broken $missing || true
   fi
 fi
+# nodejs/npm is the only hard requirement — git is critical for one
+# extension (pi-anthropic-messages from GitHub) but its absence is
+# survivable; python/openssl/ripgrep are nice-to-have.
 if ! command -v npm >/dev/null 2>&1; then
   echo "ERR: npm not installed; skipping npm step. Open the Config sheet"
   echo "     and tap 'Re-run setup' once network/mirrors recover."
   exit 1
+fi
+
+# --- 1a. Drop the legacy @mariozechner/pi-coding-agent scope if it's on disk
+# from a previous install. Pocket Pi v0.3.0 shipped both scopes; v0.3.1+ uses
+# only @earendil-works/pi-coding-agent (which the dashboard's v0.5+ jiti
+# resolution requires). Leaving the legacy package installed causes the
+# dashboard to surface an amber "legacy pi detected" banner because the two
+# scopes' `bin/pi` symlinks collide (EEXIST). Idempotent: noop on fresh
+# installs where the package was never present.
+if command -v npm >/dev/null 2>&1; then
+  if [ -d "$PREFIX/lib/node_modules/@mariozechner/pi-coding-agent" ]; then
+    echo "==> Removing legacy @mariozechner/pi-coding-agent"
+    npm uninstall -g @mariozechner/pi-coding-agent 2>&1 | tail -3 || \
+      echo "  WARN: legacy uninstall failed (continuing)"
+  fi
 fi
 
 # --- 2. npm packages --------------------------------------------------------
@@ -62,8 +106,10 @@ while IFS= read -r pkg; do
   pkg="${pkg%%#*}"; pkg="${pkg// /}"
   [ -z "$pkg" ] && continue
   flags=()
+  # Glob trailing `*` matches the optional `@<version>` pin suffix
+  # (e.g. `@blackbelt-technology/pi-agent-dashboard@0.5.3`).
   case "$pkg" in
-    @blackbelt-technology/pi-agent-dashboard) flags+=(--ignore-scripts) ;;
+    @blackbelt-technology/pi-agent-dashboard*) flags+=(--ignore-scripts) ;;
   esac
   echo "  -> npm install -g --force ${flags[*]} $pkg"
   npm install -g --force "${flags[@]}" "$pkg" 2>&1 | tail -3 || echo "  WARN: $pkg failed to install"
@@ -105,14 +151,15 @@ echo "==> Registering Pi extensions"
 while IFS= read -r pkg; do
   pkg="${pkg%%#*}"; pkg="${pkg// /}"
   [ -z "$pkg" ] && continue
+  # Trailing `*` matches an optional `@<version>` pin suffix.
   case "$pkg" in
-    @mariozechner/pi-coding-agent) continue ;;
+    @mariozechner/pi-coding-agent*) continue ;;
     @earendil-works/*) continue ;;
     tsx) continue ;;
     # The dashboard is registered by absolute path below — going through
     # `pi install npm:` would re-trigger npm install without --ignore-scripts
     # and crash on node-pty's native build.
-    @blackbelt-technology/pi-agent-dashboard) continue ;;
+    @blackbelt-technology/pi-agent-dashboard*) continue ;;
   esac
   echo "  -> pi install npm:$pkg"
   pi install "npm:$pkg" 2>&1 | tail -2 || echo "  WARN: $pkg failed to register"
@@ -342,6 +389,37 @@ fi
 API
 chmod +x "$POCKET_PI_API"
 echo "==> wrote $POCKET_PI_API (curl shim for the localhost API)"
+
+# --- 3f. Suppress cosmetic dashboard diagnostic warnings --------------------
+# Two cosmetic errors the dashboard's Diagnostics surface raises that don't
+# affect Pocket Pi functionality:
+#
+# (1) "Managed install (~/.pi-dashboard) not created" — the dashboard's
+#     Electron-managed install path. Pocket Pi never uses it (we manage
+#     everything through $PREFIX and `tool-overrides.json`), but the
+#     diagnostic does a dir-existence probe. Creating an empty sentinel
+#     satisfies the check without changing any behavior.
+#
+# (2) Zrok tunnel enabled by default. The Settings → General → Tunnel toggle
+#     defaults to ON; the watchdog then probes a non-existent tunnel forever
+#     because we don't bundle the zrok binary. Flip the default OFF; users
+#     who actually want tunneling can re-enable it in the dashboard UI.
+mkdir -p "$HOME/.pi-dashboard"
+DASH_CFG="$HOME/.pi/dashboard/config.json"
+mkdir -p "$(dirname "$DASH_CFG")"
+python3 - "$DASH_CFG" <<'PY' || echo "WARN: dashboard config tweak skipped"
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+data = {}
+if p.exists():
+    try: data = json.loads(p.read_text())
+    except Exception: pass
+tunnel = data.setdefault("tunnel", {})
+tunnel["enabled"] = False
+p.parent.mkdir(parents=True, exist_ok=True)
+p.write_text(json.dumps(data, indent=2))
+print(f"==> wrote {p}: tunnel.enabled=False")
+PY
 
 # --- 4. Apply hermes-evolve patch (re-include claude-bridge under -p) -------
 echo "==> Applying hermes-evolve claude-bridge re-include patch"

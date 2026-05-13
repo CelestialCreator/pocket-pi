@@ -1,9 +1,15 @@
-@mariozechner/pi-coding-agent
+# Legacy @mariozechner scope dropped — the canonical @earendil-works build
+# from v0.74+ supersedes it and ships jiti (which the dashboard now requires
+# in v0.5.x; old scope tops out at 0.73 and its bin/pi symlink collides with
+# the new scope's EEXIST, surfacing as an amber banner in the dashboard).
 @earendil-works/pi-coding-agent
 @earendil-works/pi-agent-core
 @earendil-works/pi-ai
 @earendil-works/pi-tui
-@blackbelt-technology/pi-agent-dashboard
+# Pinned: jumping from 0.4.x to 0.5.x changes the TS-loader contract (tsx
+# removed in favor of jiti) and introduces the in-tree Honcho plugin + crash
+# safety net. Re-pin deliberately when adopting a future minor.
+@blackbelt-technology/pi-agent-dashboard@0.5.3
 tsx
 pi-web-access
 pi-subagents

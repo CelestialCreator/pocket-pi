@@ -34,17 +34,18 @@ class PiBridge(private val ctx: Context) {
         // to ~/.pi/dashboard/dashboard.log so we can debug from logcat if
         // it never binds :8000.
         //
-        // pi-dashboard is launched via explicit node + tsx loader because
-        // its shipped shebang uses `env -S` semantics that Termux's env
-        // doesn't honor (gives "Permission denied").
-        val dashCli = "$prefix/lib/node_modules/" +
-            "@blackbelt-technology/pi-agent-dashboard/packages/server/src/cli.ts"
-        val tsxLoader = "$prefix/lib/node_modules/tsx/dist/loader.mjs"
+        // We invoke the `pi-dashboard` shim that ships in $PREFIX/bin
+        // (npm-installed via @blackbelt-technology/pi-agent-dashboard). In
+        // v0.5+ the shim is a tiny ESM wrapper at packages/server/bin/
+        // pi-dashboard.mjs that resolves jiti from pi's tree and re-execs
+        // `node --import <jiti-url> cli.ts <args>` — no more hand-rolling
+        // a tsx-loader path or guessing where the cli.ts lives. Falls back
+        // cleanly with exit code 1 + a clear message on dashboard.log if
+        // @earendil-works/pi-coding-agent (which ships jiti) isn't on disk.
         val launch = buildString {
             append("mkdir -p \$HOME/.pi/dashboard; ")
             append("(")
-            append("[ -f $dashCli ] && [ -f $tsxLoader ] && ")
-            append("node --import $tsxLoader $dashCli start ")
+            append("pi-dashboard start ")
             append(">>\$HOME/.pi/dashboard/dashboard.log 2>&1 &")
             append(") ; ")
             append("exec sleep infinity | exec pi --mode rpc")
