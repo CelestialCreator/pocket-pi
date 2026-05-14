@@ -9,9 +9,7 @@ Pocket Pi is a thin Android wrapper around two upstream projects that do the rea
 
 What Pocket Pi adds is the packaging: a Termux runtime, postinstall script, an Android service that supervises `pi --mode rpc` + the dashboard's Node server, a Compose WebView with a small recovery UI for when the bootstrap stalls, and an on-device HTTP bridge (`127.0.0.1:9998`, per-launch bearer token) that lets the agent reach Android capabilities — notifications, intents, share-sheet, camera, mic, location, clipboard, deep-link inbox — without any companion APK.
 
-<video src="./assets/pocket-pi-demo.mp4" controls width="100%" muted playsinline>
-  Your browser doesn't render inline video. <a href="./assets/pocket-pi-demo.mp4">Watch the demo</a>.
-</video>
+![Pocket Pi demo — agent driving the phone end-to-end](./assets/pocket-pi-demo.gif)
 
 ## Install
 
