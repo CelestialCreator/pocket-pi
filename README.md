@@ -9,10 +9,14 @@ Pocket Pi is a thin Android wrapper around two upstream projects that do the rea
 
 What Pocket Pi adds is the packaging: a Termux runtime, postinstall script, an Android service that supervises `pi --mode rpc` + the dashboard's Node server, a Compose WebView with a small recovery UI for when the bootstrap stalls, and an on-device HTTP bridge (`127.0.0.1:9998`, per-launch bearer token) that lets the agent reach Android capabilities — notifications, intents, share-sheet, camera, mic, location, clipboard, deep-link inbox — without any companion APK.
 
+<video src="./assets/pocket-pi-demo.mp4" controls width="100%" muted playsinline>
+  Your browser doesn't render inline video. <a href="./assets/pocket-pi-demo.mp4">Watch the demo</a>.
+</video>
+
 ## Install
 
 1. Grab the latest APK — **v0.4.0** — from the [Releases page](https://github.com/CelestialCreator/pocket-pi/releases/latest), or directly: [pocket-pi-v0.4.0.apk](https://github.com/CelestialCreator/pocket-pi/releases/download/v0.4.0/pocket-pi-v0.4.0.apk) (68 MB, aarch64 only).
-2. Sideload — tap the APK on the phone (allow install from unknown sources for your browser/file manager), or `adb install pocket-pi-v0.4.0.apk`.
+2. Sideload — tap the APK on the phone (allow install from unknown sources for your browser/file manager), or `adb install pocket-pi-v0.4.0.apk`. **On Android 13+ devices, Play Protect will warn and Accessibility may be blocked — see [Troubleshooting](#troubleshooting) below.**
 3. Open the app. First launch runs the bootstrap (3–5 min on Wi-Fi: extracts Termux, installs Node + npm packages, registers Pi extensions).
 4. When the dashboard loads, tap its **⚙** (top-right of the page chrome) → **Providers** → add at least one provider. See [Providers — what works](#providers--what-works) below.
 5. Pick a model, chat away.
@@ -113,6 +117,30 @@ The current build uses `applicationId = com.termux` so the upstream Termux boots
 | `applicationId` ≠ `com.termux` | not yet — requires custom bootstrap rebuild |
 | Old Android WebView builds (Chrome < ~120) | emulator system images ship stale WebView; real devices auto-update — confirmed working in Chrome 140+ |
 
+## Troubleshooting
+
+Two install-time gotchas on real Android 12+ devices that don't appear on the emulator. Both have one-time fixes.
+
+### "Play Protect blocks the install"
+
+When you tap the APK, Android's Play Protect scanner throws a scary "harmful app" warning and the install dialog defaults to **Cancel**. Pocket Pi isn't malicious — Play Protect just doesn't recognise it because it's not on the Play Store. Two recovery paths:
+
+- **Easiest:** on the install dialog itself, tap **More details** → **Install anyway** (or **Install without scanning**). Doesn't change any system setting.
+- **Or:** Settings → Google → Play Protect (gear icon, top right) → toggle **Scan apps with Play Protect** off → install → toggle it back on. Play Protect re-scans periodically; once Pocket Pi is installed, it stays trusted.
+
+The signal is correct in spirit — Pocket Pi isn't on the Play Store. The APK source is the [Releases page on this repo](https://github.com/CelestialCreator/pocket-pi/releases/latest), so it's your own choice to trust it. Pocket Pi has no telemetry, no analytics, and no network calls of its own — everything that goes out is from your chosen LLM provider's SDK and the Pi agent runtime ([see Credits](#credits)).
+
+### "Accessibility toggle is greyed out (Restricted settings)"
+
+After tapping **Use Pocket Pi** in Settings → Accessibility, the toggle visibly does nothing. This is Android 13+'s "Restricted settings" mitigation, which blocks Accessibility for any APK not installed via Play Store — Pocket Pi included. The unlock is hidden but two taps away:
+
+1. Settings → Apps → **Pocket Pi**
+2. Tap the **⋮ menu** in the top-right corner of the App info screen *(on OxygenOS, MIUI, OneUI: scroll all the way to the bottom of App info instead — the same option lives there)*
+3. Tap **Allow restricted settings** → confirm
+4. Go back to Settings → Accessibility → **Pocket Pi** → toggle **Use Pocket Pi** — it now binds. Accept the system consent dialog ("Allow Pocket Pi to have full control of your device").
+
+This affects every legitimate Accessibility consumer that's sideloaded — Tasker, Bitwarden autofill, KDE Connect all hit the same wall. v0.5's planned custom-prefix bootstrap unlocks the Play Store distribution path, which removes this step permanently.
+
 ## Credits
 
 Pocket Pi is just packaging. The actual agent engine and the chat UI are someone else's work — Pocket Pi wouldn't exist without:
@@ -140,3 +168,7 @@ Roadmap from here, in rough priority order:
 - **Background location escalation** when a real use case lands ("Allow all the time" → `ACCESS_BACKGROUND_LOCATION`).
 - **More OAuth providers** end-to-end (Gemini CLI, ChatGPT Codex, GitHub Copilot, Antigravity) — each requires a small Pi-side protocol bridge analogous to `pi-anthropic-messages`.
 - **Custom-prefix bootstrap** so `applicationId` can move off `com.termux`. Currently a 4–12 h Docker build on Apple Silicon; once it's clean, the path to a real signed release on Play Store is short.
+
+---
+
+⭐ **If Pocket Pi is useful to you, please consider giving the repo a star** — it genuinely helps others discover the project. Bug reports, deep-link recipes for your favorite apps, and translations are all warmly welcomed → [good first issues](https://github.com/CelestialCreator/pocket-pi/labels/good%20first%20issue).
